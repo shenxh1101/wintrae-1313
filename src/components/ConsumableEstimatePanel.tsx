@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Droplets, UtensilsCrossed, Flame, Shirt, MoreHorizontal, Plus, Minus, TrendingUp, TrendingDown, Check } from 'lucide-react';
+import { Droplets, UtensilsCrossed, Flame, Shirt, MoreHorizontal, Plus, Minus, TrendingUp, TrendingDown, Check, ShoppingCart, Eye, EyeOff } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
-import { calculateConsumableEstimates, getConsumableByType, formatEstimateSummary } from '@/utils/consumableEstimate';
+import { calculateConsumableEstimates, getConsumableByType, formatEstimateSummary, getGearItemById } from '@/utils/consumableEstimate';
 import { formatWeight } from '@/utils/weightCalc';
 import { ConsumableType, CONSUMABLE_TYPE_LABELS } from '@/types';
 
@@ -24,7 +24,9 @@ const typeColors = {
 const ConsumableEstimatePanel = () => {
   const plan = useGearStore(state => state.getCurrentPlan());
   const updateGearQuantity = useGearStore(state => state.updateGearQuantity);
+  const addGearItem = useGearStore(state => state.addGearItem);
   const [activeType, setActiveType] = useState<ConsumableType | 'all'>('all');
+  const [showNotInList, setShowNotInList] = useState(true);
 
   if (!plan) return null;
 
@@ -34,38 +36,53 @@ const ConsumableEstimatePanel = () => {
     plan.destination.days
   );
 
-  const byType = getConsumableByType(estimates, plan.gearList);
+  const byType = getConsumableByType(estimates);
   const summary = formatEstimateSummary(estimates);
 
-  const filteredEstimates = activeType === 'all'
+  const filteredByType = activeType === 'all'
     ? estimates
     : byType[activeType];
+
+  const filteredEstimates = showNotInList
+    ? filteredByType
+    : filteredByType.filter(e => e.inList);
 
   const consumableTypes: ConsumableType[] = ['water', 'food', 'fuel', 'clothing', 'other'];
   const availableTypes = consumableTypes.filter(t => byType[t].length > 0);
 
-  const handleQuickAdd = (itemId: string, currentQty: number, recommendedQty: number) => {
-    const diff = recommendedQty - currentQty;
-    if (diff > 0) {
-      updateGearQuantity(itemId, recommendedQty);
+  const handleAddToPlan = (itemId: string, qty: number) => {
+    const gearItem = getGearItemById(itemId);
+    if (gearItem) {
+      addGearItem(gearItem, qty);
     }
   };
 
-  if (estimates.length === 0) {
-    return (
-      <div className="bg-white rounded-2xl shadow-card p-6 border border-cream-200">
-        <h2 className="text-lg font-bold text-forest-800 mb-4 flex items-center gap-2">
-          <span className="text-2xl">📊</span>
-          易耗品估算
-        </h2>
-        <div className="text-center py-8 text-earth-400">
-          <div className="text-4xl mb-2">📦</div>
-          <p>还没有添加消耗品</p>
-          <p className="text-sm mt-1">从装备库添加水、食物、燃料等消耗品吧</p>
-        </div>
-      </div>
-    );
-  }
+  const handleQuickAdd = (itemId: string, currentQty: number, recommendedQty: number, inList: boolean) => {
+    if (inList) {
+      if (recommendedQty > currentQty) {
+        updateGearQuantity(itemId, recommendedQty);
+      }
+    } else {
+      handleAddToPlan(itemId, recommendedQty);
+    }
+  };
+
+  const deficitItems = estimates.filter(e => e.diff < 0);
+  const hasDeficit = deficitItems.length > 0;
+
+  const handleQuickAddAll = () => {
+    deficitItems.forEach(item => {
+      const qtyToAdd = item.recommendedQty;
+      if (item.inList) {
+        updateGearQuantity(item.itemId, item.recommendedQty);
+      } else {
+        const gearItem = getGearItemById(item.itemId);
+        if (gearItem) {
+          addGearItem(gearItem, qtyToAdd);
+        }
+      }
+    });
+  };
 
   return (
     <div className="bg-white rounded-2xl shadow-card p-6 border border-cream-200">
@@ -73,10 +90,15 @@ const ConsumableEstimatePanel = () => {
         <h2 className="text-lg font-bold text-forest-800 flex items-center gap-2">
           <span className="text-2xl">📊</span>
           易耗品估算
+          <span className="text-sm font-normal text-earth-500">({plan.destination.days}天 × {plan.crew.length}人)</span>
         </h2>
-        <div className="text-sm text-earth-500">
-          {plan.destination.days}天 × {plan.crew.length}人
-        </div>
+        <button
+          onClick={() => setShowNotInList(!showNotInList)}
+          className="flex items-center gap-1 text-xs text-earth-500 hover:text-earth-700 transition-colors"
+        >
+          {showNotInList ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+          {showNotInList ? '隐藏未添加' : '显示未添加'}
+        </button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -85,8 +107,10 @@ const ConsumableEstimatePanel = () => {
           <div className="text-xl font-bold text-forest-800">{estimates.length}</div>
         </div>
         <div className="p-3 bg-cream-50 rounded-xl border border-cream-200">
-          <div className="text-xs text-earth-500 mb-1">当前总数</div>
-          <div className="text-xl font-bold text-forest-800">{summary.totalCurrent}</div>
+          <div className="text-xs text-earth-500 mb-1">已添加</div>
+          <div className="text-xl font-bold text-forest-800">
+            {estimates.filter(e => e.inList).length}
+          </div>
         </div>
         <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
           <div className="text-xs text-blue-600 mb-1">建议总数</div>
@@ -111,6 +135,16 @@ const ConsumableEstimatePanel = () => {
           </div>
         </div>
       </div>
+
+      {hasDeficit && (
+        <button
+          onClick={handleQuickAddAll}
+          className="w-full mb-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+        >
+          <ShoppingCart className="w-4 h-4" />
+          一键补齐所有缺口 ({deficitItems.length}种)
+        </button>
+      )}
 
       {availableTypes.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
@@ -146,18 +180,19 @@ const ConsumableEstimatePanel = () => {
         {filteredEstimates.map(estimate => {
           const isDeficit = estimate.diff < 0;
           const isSurplus = estimate.diff > 0;
-          const item = plan.gearList.find(g => g.id === estimate.itemId);
-          const consumableType = item?.consumableType || 'other';
+          const consumableType = estimate.consumableType || 'other';
 
           return (
             <div
               key={estimate.itemId}
               className={`p-3 rounded-xl border transition-all ${
-                isDeficit
-                  ? 'bg-red-50 border-red-200'
-                  : isSurplus
-                    ? 'bg-green-50 border-green-200'
-                    : 'bg-cream-50 border-cream-200'
+                !estimate.inList
+                  ? 'bg-earth-50 border-earth-200 opacity-75'
+                  : isDeficit
+                    ? 'bg-red-50 border-red-200'
+                    : isSurplus
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-cream-50 border-cream-200'
               }`}
             >
               <div className="flex items-start justify-between">
@@ -166,14 +201,21 @@ const ConsumableEstimatePanel = () => {
                     {typeIcons[consumableType]}
                   </div>
                   <div>
-                    <h4 className="font-medium text-forest-800 text-sm">
-                      {estimate.itemName}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-medium text-forest-800 text-sm">
+                        {estimate.itemName}
+                      </h4>
                       {estimate.isShared && (
-                        <span className="ml-1.5 text-xs px-1.5 py-0.5 bg-forest-100 text-forest-700 rounded">
+                        <span className="text-xs px-1.5 py-0.5 bg-forest-100 text-forest-700 rounded">
                           共享
                         </span>
                       )}
-                    </h4>
+                      {!estimate.inList && (
+                        <span className="text-xs px-1.5 py-0.5 bg-earth-200 text-earth-600 rounded">
+                          未添加
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs text-earth-500 mt-0.5">
                       {estimate.perPersonPerDay && (
                         <span>每人每天 {estimate.perPersonPerDay} 份</span>
@@ -188,40 +230,59 @@ const ConsumableEstimatePanel = () => {
                 </div>
 
                 <div className="text-right">
-                  <div className="flex items-center gap-1 mb-1">
-                    <button
-                      onClick={() => updateGearQuantity(estimate.itemId, estimate.currentQty - 1)}
-                      className="w-6 h-6 flex items-center justify-center text-earth-500 hover:bg-earth-200 rounded transition-colors"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="w-12 text-center font-medium text-forest-800">
-                      {estimate.currentQty}
-                    </span>
-                    <button
-                      onClick={() => updateGearQuantity(estimate.itemId, estimate.currentQty + 1)}
-                      className="w-6 h-6 flex items-center justify-center text-earth-500 hover:bg-earth-200 rounded transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className={`text-xs font-medium ${
-                    isDeficit ? 'text-red-600' : isSurplus ? 'text-green-600' : 'text-earth-500'
-                  }`}>
-                    建议 {estimate.recommendedQty} 份
-                    {isDeficit && ` (缺${Math.abs(estimate.diff)})`}
-                    {isSurplus && ` (多${estimate.diff})`}
-                  </div>
+                  {estimate.inList ? (
+                    <>
+                      <div className="flex items-center gap-1 mb-1">
+                        <button
+                          onClick={() => updateGearQuantity(estimate.itemId, estimate.currentQty - 1)}
+                          className="w-6 h-6 flex items-center justify-center text-earth-500 hover:bg-earth-200 rounded transition-colors"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="w-12 text-center font-medium text-forest-800">
+                          {estimate.currentQty}
+                        </span>
+                        <button
+                          onClick={() => updateGearQuantity(estimate.itemId, estimate.currentQty + 1)}
+                          className="w-6 h-6 flex items-center justify-center text-earth-500 hover:bg-earth-200 rounded transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className={`text-xs font-medium ${
+                        isDeficit ? 'text-red-600' : isSurplus ? 'text-green-600' : 'text-earth-500'
+                      }`}>
+                        建议 {estimate.recommendedQty} 份
+                        {isDeficit && ` (缺${Math.abs(estimate.diff)})`}
+                        {isSurplus && ` (多${estimate.diff})`}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-1 mb-1">
+                        <span className="text-earth-400 text-sm">0</span>
+                        <span className="text-earth-400 text-xs">/</span>
+                        <span className="text-blue-600 font-medium text-sm">{estimate.recommendedQty}</span>
+                      </div>
+                      <div className="text-xs text-earth-500">
+                        建议 {estimate.recommendedQty} 份
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               {isDeficit && (
                 <button
-                  onClick={() => handleQuickAdd(estimate.itemId, estimate.currentQty, estimate.recommendedQty)}
-                  className="mt-2 w-full py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs rounded-lg transition-colors flex items-center justify-center gap-1"
+                  onClick={() => handleQuickAdd(estimate.itemId, estimate.currentQty, estimate.recommendedQty, estimate.inList)}
+                  className={`mt-2 w-full py-1.5 text-white text-xs rounded-lg transition-colors flex items-center justify-center gap-1 ${
+                    estimate.inList
+                      ? 'bg-red-500 hover:bg-red-600'
+                      : 'bg-amber-500 hover:bg-amber-600'
+                  }`}
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  一键补充到建议数量
+                  {estimate.inList ? '补充到建议数量' : '添加到清单'}
                 </button>
               )}
             </div>
@@ -234,15 +295,16 @@ const ConsumableEstimatePanel = () => {
           <p className="text-sm text-amber-700 flex items-center gap-2">
             <span className="text-lg">⚠️</span>
             有 {summary.deficitCount} 种消耗品数量不足，建议及时补充
+            {summary.notInListCount > 0 && `（含 ${summary.notInListCount} 种未添加）`}
           </p>
         </div>
       )}
 
-      {summary.deficitCount === 0 && estimates.length > 0 && (
+      {summary.deficitCount === 0 && estimates.some(e => e.inList) && (
         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-xl">
           <p className="text-sm text-green-700 flex items-center gap-2">
             <Check className="w-4 h-4" />
-            所有消耗品数量充足，准备充分！
+            已添加的消耗品数量充足，准备充分！
           </p>
         </div>
       )}

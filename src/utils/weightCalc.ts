@@ -1,4 +1,4 @@
-import { ListItem, CrewMember, WeightBreakdown, GearCategory, Backpack } from '@/types';
+import { ListItem, CrewMember, WeightBreakdown, GearCategory, Backpack, ItemAllocation } from '@/types';
 
 export const calculateWeight = (
   gearList: ListItem[],
@@ -28,6 +28,11 @@ export const calculateWeight = (
   let total = 0;
   let unassigned = 0;
 
+  const backpackOwners: Record<string, string> = {};
+  backpacks.forEach(bp => {
+    backpackOwners[bp.id] = bp.ownerId;
+  });
+
   gearList.forEach(item => {
     const itemWeight = item.weight * item.quantity;
     total += itemWeight;
@@ -39,16 +44,32 @@ export const calculateWeight = (
         byPerson[member.id] += shareWeight;
       });
       unassigned += itemWeight;
-    } else if (item.carrierId && byPerson[item.carrierId] !== undefined) {
-      byPerson[item.carrierId] += itemWeight;
+      return;
+    }
+
+    const allocations = getItemAllocations(item);
+    const totalAllocQty = allocations.reduce((s, a) => s + a.quantity, 0);
+    const unallocatedQty = item.quantity - totalAllocQty;
+
+    allocations.forEach(alloc => {
+      const allocWeight = item.weight * alloc.quantity;
       
-      if (item.backpackId && byBackpack[item.backpackId] !== undefined) {
-        byBackpack[item.backpackId] += itemWeight;
-      } else {
-        unassigned += itemWeight;
+      if (byBackpack[alloc.backpackId] !== undefined) {
+        byBackpack[alloc.backpackId] += allocWeight;
       }
-    } else {
-      unassigned += itemWeight;
+      
+      const ownerId = backpackOwners[alloc.backpackId];
+      if (ownerId && byPerson[ownerId] !== undefined) {
+        byPerson[ownerId] += allocWeight;
+      }
+    });
+
+    if (unallocatedQty > 0) {
+      unassigned += item.weight * unallocatedQty;
+      
+      if (item.carrierId && byPerson[item.carrierId] !== undefined) {
+        byPerson[item.carrierId] += item.weight * unallocatedQty;
+      }
     }
   });
 
@@ -64,6 +85,71 @@ export const calculateWeight = (
   };
 };
 
+export const getItemAllocations = (item: ListItem): ItemAllocation[] => {
+  if (item.allocations && item.allocations.length > 0) {
+    return item.allocations;
+  }
+  
+  if (item.backpackId) {
+    return [{ backpackId: item.backpackId, quantity: item.quantity }];
+  }
+  
+  return [];
+};
+
+export const getBackpackWeight = (
+  backpackId: string,
+  gearList: ListItem[]
+): number => {
+  return gearList.reduce((sum, item) => {
+    if (item.isShared) return sum;
+    
+    const allocations = getItemAllocations(item);
+    const alloc = allocations.find(a => a.backpackId === backpackId);
+    if (alloc) {
+      return sum + item.weight * alloc.quantity;
+    }
+    return sum;
+  }, 0);
+};
+
+export const getBackpackItems = (
+  backpackId: string,
+  gearList: ListItem[]
+): { item: ListItem; quantity: number }[] => {
+  const items: { item: ListItem; quantity: number }[] = [];
+  
+  gearList.forEach(item => {
+    if (item.isShared) return;
+    
+    const allocations = getItemAllocations(item);
+    const alloc = allocations.find(a => a.backpackId === backpackId);
+    if (alloc && alloc.quantity > 0) {
+      items.push({ item, quantity: alloc.quantity });
+    }
+  });
+  
+  return items;
+};
+
+export const getUnassignedItems = (gearList: ListItem[]): { item: ListItem; quantity: number }[] => {
+  const items: { item: ListItem; quantity: number }[] = [];
+  
+  gearList.forEach(item => {
+    if (item.isShared) return;
+    
+    const allocations = getItemAllocations(item);
+    const totalAlloc = allocations.reduce((s, a) => s + a.quantity, 0);
+    const unallocated = item.quantity - totalAlloc;
+    
+    if (unallocated > 0) {
+      items.push({ item, quantity: unallocated });
+    }
+  });
+  
+  return items;
+};
+
 export const formatWeight = (grams: number): string => {
   if (grams >= 1000) {
     return `${(grams / 1000).toFixed(1)} kg`;
@@ -74,17 +160,4 @@ export const formatWeight = (grams: number): string => {
 export const getWeightPercentage = (current: number, max: number): number => {
   if (max <= 0) return 0;
   return Math.min((current / max) * 100, 100);
-};
-
-export const getBackpackWeight = (
-  backpackId: string,
-  gearList: ListItem[]
-): number => {
-  return gearList
-    .filter(item => item.backpackId === backpackId)
-    .reduce((sum, item) => sum + item.weight * item.quantity, 0);
-};
-
-export const getUnassignedItems = (gearList: ListItem[]): ListItem[] => {
-  return gearList.filter(item => !item.isShared && !item.backpackId);
 };

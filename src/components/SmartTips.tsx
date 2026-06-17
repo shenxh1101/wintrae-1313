@@ -37,6 +37,7 @@ const SmartTips = () => {
   const allTips = generateSmartTips({
     gearList: plan.gearList,
     crew: plan.crew,
+    backpacks: plan.backpacks,
     season: plan.destination.season,
     days: plan.destination.days,
     weather: plan.destination.weather,

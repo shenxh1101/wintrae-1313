@@ -44,6 +44,8 @@ interface GearState {
   updateGearQuantity: (itemId: string, quantity: number) => void;
   setGearCarrier: (itemId: string, carrierId: string | undefined) => void;
   setGearBackpack: (itemId: string, backpackId: string | undefined) => void;
+  addGearToBackpack: (itemId: string, backpackId: string, quantity: number) => void;
+  removeGearFromBackpack: (itemId: string, backpackId: string, quantity: number) => void;
   toggleGearShared: (itemId: string) => void;
   toggleKeepDuplicate: (itemId: string) => void;
   
@@ -94,16 +96,52 @@ const createDefaultPlan = (name: string): Plan => {
   };
 };
 
+const normalizeAllocations = (item: ListItem): ListItem => {
+  if (!item.backpackId && (!item.allocations || item.allocations.length === 0)) {
+    return { ...item, allocations: [] };
+  }
+  
+  if (item.backpackId && (!item.allocations || item.allocations.length === 0)) {
+    return {
+      ...item,
+      allocations: [{ backpackId: item.backpackId, quantity: item.quantity }],
+    };
+  }
+  
+  const totalAllocQty = item.allocations?.reduce((s, a) => s + a.quantity, 0) || 0;
+  
+  if (totalAllocQty < item.quantity && item.backpackId) {
+    const existingAlloc = item.allocations?.find(a => a.backpackId === item.backpackId);
+    if (existingAlloc) {
+      const diff = item.quantity - totalAllocQty + existingAlloc.quantity;
+      return {
+        ...item,
+        allocations: item.allocations.map(a =>
+          a.backpackId === item.backpackId
+            ? { ...a, quantity: diff }
+            : a
+        ),
+      };
+    }
+  }
+  
+  return item;
+};
+
 const migratePlan = (plan: Plan): Plan => {
   return {
     ...plan,
     backpacks: plan.backpacks || [],
     ignoredTips: plan.ignoredTips || [],
     checkProgress: plan.checkProgress || {},
-    gearList: plan.gearList.map(item => ({
-      ...item,
-      keepDuplicate: item.keepDuplicate ?? false,
-    })),
+    gearList: plan.gearList.map(item => {
+      const migrated = {
+        ...item,
+        keepDuplicate: item.keepDuplicate ?? false,
+        allocations: item.allocations || [],
+      };
+      return normalizeAllocations(migrated);
+    }),
   };
 };
 
@@ -410,12 +448,42 @@ export const useGearStore = create<GearState>((set, get) => {
         get().removeGearItem(itemId);
         return;
       }
-      updateCurrentPlan(plan => ({
-        ...plan,
-        gearList: plan.gearList.map(i =>
-          i.id === itemId ? { ...i, quantity } : i
-        ),
-      }));
+      updateCurrentPlan(plan => {
+        const item = plan.gearList.find(i => i.id === itemId);
+        if (!item) return plan;
+
+        let newAllocations = item.allocations || [];
+        const totalAlloc = newAllocations.reduce((s, a) => s + a.quantity, 0);
+
+        if (quantity > totalAlloc && totalAlloc > 0) {
+          const diff = quantity - totalAlloc;
+          if (newAllocations.length > 0) {
+            newAllocations = newAllocations.map((a, idx) =>
+              idx === 0 ? { ...a, quantity: a.quantity + diff } : a
+            );
+          }
+        } else if (quantity < totalAlloc) {
+          let remaining = totalAlloc - quantity;
+          const newAllocs = [...newAllocations];
+          for (let i = newAllocs.length - 1; i >= 0 && remaining > 0; i--) {
+            const reduce = Math.min(remaining, newAllocs[i].quantity);
+            newAllocs[i] = { ...newAllocs[i], quantity: newAllocs[i].quantity - reduce };
+            remaining -= reduce;
+          }
+          newAllocations = newAllocs.filter(a => a.quantity > 0);
+        }
+
+        const firstBackpack = newAllocations.length > 0 ? newAllocations[0].backpackId : item.backpackId;
+
+        return {
+          ...plan,
+          gearList: plan.gearList.map(i =>
+            i.id === itemId
+              ? { ...i, quantity, allocations: newAllocations, backpackId: firstBackpack }
+              : i
+          ),
+        };
+      });
     },
 
     setGearCarrier: (itemId: string, carrierId: string | undefined) => {
@@ -428,12 +496,122 @@ export const useGearStore = create<GearState>((set, get) => {
     },
 
     setGearBackpack: (itemId: string, backpackId: string | undefined) => {
-      updateCurrentPlan(plan => ({
-        ...plan,
-        gearList: plan.gearList.map(i =>
-          i.id === itemId ? { ...i, backpackId } : i
-        ),
-      }));
+      updateCurrentPlan(plan => {
+        const item = plan.gearList.find(i => i.id === itemId);
+        if (!item) return plan;
+
+        let newAllocations = item.allocations || [];
+        if (backpackId) {
+          const existing = newAllocations.find(a => a.backpackId === backpackId);
+          if (existing) {
+            newAllocations = newAllocations.map(a =>
+              a.backpackId === backpackId ? { ...a, quantity: item.quantity } : a
+            );
+          } else {
+            newAllocations = [{ backpackId, quantity: item.quantity }];
+          }
+        } else {
+          newAllocations = [];
+        }
+
+        const totalAlloc = newAllocations.reduce((s, a) => s + a.quantity, 0);
+        if (totalAlloc < item.quantity && backpackId) {
+          newAllocations = newAllocations.map(a =>
+            a.backpackId === backpackId
+              ? { ...a, quantity: item.quantity - totalAlloc + a.quantity }
+              : a
+          );
+        }
+
+        return {
+          ...plan,
+          gearList: plan.gearList.map(i =>
+            i.id === itemId
+              ? { ...i, backpackId, allocations: newAllocations }
+              : i
+          ),
+        };
+      });
+    },
+
+    addGearToBackpack: (itemId: string, backpackId: string, quantity: number) => {
+      updateCurrentPlan(plan => {
+        const item = plan.gearList.find(i => i.id === itemId);
+        if (!item || quantity <= 0) return plan;
+
+        const backpack = plan.backpacks.find(b => b.id === backpackId);
+        if (!backpack) return plan;
+
+        const currentAllocs = item.allocations || [];
+        const alreadyAllocated = currentAllocs.reduce((s, a) => s + a.quantity, 0);
+        const available = item.quantity - alreadyAllocated;
+        const toAdd = Math.min(quantity, available);
+
+        if (toAdd <= 0) return plan;
+
+        let newAllocations: { backpackId: string; quantity: number }[];
+        const existing = currentAllocs.find(a => a.backpackId === backpackId);
+        if (existing) {
+          newAllocations = currentAllocs.map(a =>
+            a.backpackId === backpackId
+              ? { ...a, quantity: a.quantity + toAdd }
+              : a
+          );
+        } else {
+          newAllocations = [...currentAllocs, { backpackId, quantity: toAdd }];
+        }
+
+        const firstBackpack = newAllocations.length > 0 ? newAllocations[0].backpackId : undefined;
+
+        return {
+          ...plan,
+          gearList: plan.gearList.map(i =>
+            i.id === itemId
+              ? {
+                  ...i,
+                  carrierId: backpack.ownerId,
+                  backpackId: firstBackpack,
+                  allocations: newAllocations,
+                }
+              : i
+          ),
+        };
+      });
+    },
+
+    removeGearFromBackpack: (itemId: string, backpackId: string, quantity: number) => {
+      updateCurrentPlan(plan => {
+        const item = plan.gearList.find(i => i.id === itemId);
+        if (!item || quantity <= 0) return plan;
+
+        const currentAllocs = item.allocations || [];
+        const existing = currentAllocs.find(a => a.backpackId === backpackId);
+        if (!existing) return plan;
+
+        const newQty = Math.max(0, existing.quantity - quantity);
+        let newAllocations = currentAllocs
+          .map(a =>
+            a.backpackId === backpackId ? { ...a, quantity: newQty } : a
+          )
+          .filter(a => a.quantity > 0);
+
+        const firstBackpack = newAllocations.length > 0 ? newAllocations[0].backpackId : undefined;
+        const totalAlloc = newAllocations.reduce((s, a) => s + a.quantity, 0);
+
+        return {
+          ...plan,
+          gearList: plan.gearList.map(i =>
+            i.id === itemId
+              ? {
+                  ...i,
+                  backpackId: firstBackpack,
+                  carrierId: totalAlloc === 0 ? undefined : i.carrierId,
+                  allocations: newAllocations,
+                }
+              : i
+          ),
+        };
+      });
     },
 
     toggleGearShared: (itemId: string) => {

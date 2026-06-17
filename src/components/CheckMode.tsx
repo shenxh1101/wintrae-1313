@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
-import { CheckCircle, Circle, RotateCcw, X, Backpack as BackpackIcon } from 'lucide-react';
+import { CheckCircle, Circle, RotateCcw, X, Backpack as BackpackIcon, Package } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
-import { CATEGORY_LABELS, GearCategory } from '@/types';
-import { formatWeight } from '@/utils/weightCalc';
+import { formatWeight, getBackpackItems, getUnassignedItems } from '@/utils/weightCalc';
 
 interface CheckModeProps {
   onClose: () => void;
@@ -28,23 +27,59 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
   const checkedItems = validCheckProgress.filter(([, checked]) => checked).length;
   const progress = totalItems > 0 ? (checkedItems / totalItems) * 100 : 0;
 
-  const categories = Object.keys(CATEGORY_LABELS) as GearCategory[];
-  const itemsByCategory = categories.map(cat => ({
-    category: cat,
-    items: plan.gearList.filter(item => item.category === cat),
-  })).filter(group => group.items.length > 0);
-
   const handleReset = () => {
     if (confirm('确定要重置所有检查进度吗？')) {
       resetCheckProgress();
     }
   };
 
-  const getBackpackName = (backpackId?: string) => {
-    if (!backpackId) return '未分配';
-    const backpack = plan.backpacks.find(b => b.id === backpackId);
-    if (!backpack) return '未分配';
-    return backpack.name;
+  const sharedItems = plan.gearList.filter(item => item.isShared);
+  const unassignedItems = getUnassignedItems(plan.gearList);
+
+  const getMemberBackpacks = (memberId: string) => {
+    return plan.backpacks.filter(b => b.ownerId === memberId);
+  };
+
+  const CheckItemRow = ({ itemId, name, quantity, weight, subInfo }: {
+    itemId: string;
+    name: string;
+    quantity: number;
+    weight: number;
+    subInfo?: string;
+  }) => {
+    const isChecked = plan.checkProgress[itemId];
+    return (
+      <button
+        onClick={() => setCheckItem(itemId, !isChecked)}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+          isChecked ? 'bg-green-50' : 'hover:bg-cream-50'
+        }`}
+      >
+        {isChecked ? (
+          <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
+        ) : (
+          <Circle className="w-6 h-6 text-earth-300 flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className={`font-medium ${
+            isChecked ? 'text-green-700 line-through' : 'text-forest-800'
+          }`}>
+            {name}
+          </div>
+          <div className="text-xs text-earth-500 flex flex-wrap gap-2">
+            <span>数量: {quantity}</span>
+            <span>·</span>
+            <span>{formatWeight(weight)}</span>
+            {subInfo && (
+              <>
+                <span>·</span>
+                <span>{subInfo}</span>
+              </>
+            )}
+          </div>
+        </div>
+      </button>
+    );
   };
 
   return (
@@ -85,75 +120,136 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
             </div>
           ) : (
             <div className="space-y-4">
-              {itemsByCategory.map(({ category, items }) => {
-                const categoryChecked = items.filter(i => plan.checkProgress[i.id]).length;
-                
+              {plan.crew.map(member => {
+                const memberBackpacks = getMemberBackpacks(member.id);
+                const memberUnassigned = unassignedItems.filter(
+                  ({ item }) => item.carrierId === member.id
+                );
+
+                if (memberBackpacks.length === 0 && memberUnassigned.length === 0) {
+                  return null;
+                }
+
                 return (
-                  <div key={category} className="border border-cream-200 rounded-xl overflow-hidden">
-                    <div className="px-4 py-3 bg-cream-50 border-b border-cream-200 flex items-center justify-between">
+                  <div key={member.id} className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: member.avatarColor }}
+                      />
                       <h3 className="font-medium text-forest-800">
-                        {CATEGORY_LABELS[category]}
+                        {member.name}的装备
                       </h3>
-                      <span className="text-sm text-earth-500">
-                        {categoryChecked}/{items.length}
-                      </span>
                     </div>
-                    
-                    <div className="divide-y divide-cream-100">
-                      {items.map(item => {
-                        const isChecked = plan.checkProgress[item.id];
-                        
-                        return (
-                          <button
-                            key={item.id}
-                            onClick={() => setCheckItem(item.id, !isChecked)}
-                            className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
-                              isChecked ? 'bg-green-50' : 'hover:bg-cream-50'
-                            }`}
-                          >
-                            {isChecked ? (
-                              <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
-                            ) : (
-                              <Circle className="w-6 h-6 text-earth-300 flex-shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className={`font-medium ${
-                                isChecked ? 'text-green-700 line-through' : 'text-forest-800'
-                              }`}>
-                                {item.name}
-                              </div>
-                              <div className="text-xs text-earth-500 flex flex-wrap gap-2">
-                                <span>数量: {item.quantity}</span>
-                                <span>·</span>
-                                <span>{formatWeight(item.weight * item.quantity)}</span>
-                                {item.isShared ? (
-                                  <><span>·</span><span className="text-forest-600">共享装备</span></>
-                                ) : (
-                                  <>
-                                    <span>·</span>
-                                    <span className="text-earth-600">
-                                      {plan.crew.find(c => c.id === item.carrierId)?.name || '未分配'}
-                                    </span>
-                                    {item.backpackId && (
-                                      <>
-                                        <span>·</span>
-                                        <span className="text-forest-600 flex items-center gap-1">
-                                          <BackpackIcon className="w-3 h-3" />
-                                          {getBackpackName(item.backpackId)}
-                                        </span>
-                                      </>
-                                    )}
-                                  </>
-                                )}
-                              </div>
+
+                    {memberBackpacks.map(backpack => {
+                      const bpItems = getBackpackItems(backpack.id, plan.gearList);
+                      const bpWeight = bpItems.reduce(
+                        (sum, { item, quantity }) => sum + item.weight * quantity, 0
+                      );
+                      const bpChecked = bpItems.filter(
+                        ({ item }) => plan.checkProgress[item.id]
+                      ).length;
+
+                      return (
+                        <div
+                          key={backpack.id}
+                          className="border border-cream-200 rounded-xl overflow-hidden ml-5"
+                        >
+                          <div className="px-4 py-3 bg-forest-50 border-b border-cream-200 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <BackpackIcon className="w-4 h-4 text-forest-600" />
+                              <h4 className="font-medium text-forest-800">
+                                {backpack.name}
+                              </h4>
+                              <span className="text-xs text-earth-500">
+                                {formatWeight(bpWeight)}
+                              </span>
                             </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                            <span className="text-sm text-earth-500">
+                              {bpChecked}/{bpItems.length}
+                            </span>
+                          </div>
+                          
+                          {bpItems.length === 0 ? (
+                            <p className="px-4 py-3 text-sm text-earth-400">
+                              背包是空的
+                            </p>
+                          ) : (
+                            <div className="divide-y divide-cream-100">
+                              {bpItems.map(({ item, quantity }) => (
+                                <CheckItemRow
+                                  key={item.id}
+                                  itemId={item.id}
+                                  name={item.name}
+                                  quantity={quantity}
+                                  weight={item.weight * quantity}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {memberUnassigned.length > 0 && (
+                      <div className="border border-cream-200 rounded-xl overflow-hidden ml-5">
+                        <div className="px-4 py-3 bg-earth-50 border-b border-cream-200 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Package className="w-4 h-4 text-earth-500" />
+                            <h4 className="font-medium text-earth-700">
+                              未分配背包
+                            </h4>
+                          </div>
+                          <span className="text-sm text-earth-500">
+                            {memberUnassigned.filter(
+                              ({ item }) => plan.checkProgress[item.id]
+                            ).length}/{memberUnassigned.length}
+                          </span>
+                        </div>
+                        <div className="divide-y divide-cream-100">
+                          {memberUnassigned.map(({ item, quantity }) => (
+                            <CheckItemRow
+                              key={item.id}
+                              itemId={item.id}
+                              name={item.name}
+                              quantity={quantity}
+                              weight={item.weight * quantity}
+                              subInfo="未分配背包"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
+
+              {sharedItems.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">👥</span>
+                    <h3 className="font-medium text-forest-800">共享装备</h3>
+                    <span className="text-xs text-earth-500">
+                      ({sharedItems.length} 件)
+                    </span>
+                  </div>
+                  <div className="border border-cream-200 rounded-xl overflow-hidden ml-5">
+                    <div className="divide-y divide-cream-100">
+                      {sharedItems.map(item => (
+                        <CheckItemRow
+                          key={item.id}
+                          itemId={item.id}
+                          name={item.name}
+                          quantity={item.quantity}
+                          weight={item.weight * item.quantity}
+                          subInfo="共享装备"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

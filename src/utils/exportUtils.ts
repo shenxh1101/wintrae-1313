@@ -1,5 +1,5 @@
 import { Plan, ListItem, CrewMember, CATEGORY_LABELS, SEASON_LABELS, WEATHER_LABELS, CAMPTYPE_LABELS, Backpack } from '@/types';
-import { formatWeight } from './weightCalc';
+import { formatWeight, getBackpackItems, getUnassignedItems } from './weightCalc';
 
 export const exportAsText = (plan: Plan): string => {
   const lines: string[] = [];
@@ -25,11 +25,8 @@ export const exportAsText = (plan: Plan): string => {
       const carrier = item.carrierId 
         ? ` - 携带者: ${plan.crew.find(c => c.id === item.carrierId)?.name || '未分配'}`
         : item.isShared ? ' - 全队共享' : '';
-      const backpack = item.backpackId
-        ? ` - 背包: ${plan.backpacks.find(b => b.id === item.backpackId)?.name || '未知'}`
-        : '';
       const weight = ` (${formatWeight(item.weight * item.quantity)})`;
-      lines.push(`  ${shared} ${item.name} x${item.quantity}${weight}${carrier}${backpack}`);
+      lines.push(`  ${shared} ${item.name} x${item.quantity}${weight}${carrier}`);
     });
     lines.push('');
   });
@@ -57,9 +54,10 @@ export const exportAsText = (plan: Plan): string => {
     if (memberBackpacks.length > 0) {
       lines.push(`    背包明细:`);
       memberBackpacks.forEach(bp => {
-        const bpItems = plan.gearList.filter(item => item.backpackId === bp.id);
-        const bpWeight = bpItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
-        lines.push(`      [${bp.name}]: ${formatWeight(bpWeight)} / ${formatWeight(bp.maxWeight)} (${bpItems.length}件)`);
+        const bpItems = getBackpackItems(bp.id, plan.gearList);
+        const bpWeight = bpItems.reduce((sum, { item, quantity }) => sum + item.weight * quantity, 0);
+        const bpCount = bpItems.reduce((sum, { quantity }) => sum + quantity, 0);
+        lines.push(`      [${bp.name}]: ${formatWeight(bpWeight)} / ${formatWeight(bp.maxWeight)} (${bpCount}件)`);
       });
     }
     lines.push('');
@@ -97,35 +95,38 @@ export const exportByPerson = (plan: Plan, memberId: string): string => {
   
   if (memberBackpacks.length > 0) {
     memberBackpacks.forEach(backpack => {
-      const bpItems = personalItems.filter(item => item.backpackId === backpack.id);
-      const bpWeight = bpItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+      const bpItems = getBackpackItems(backpack.id, plan.gearList);
+      const bpWeight = bpItems.reduce((sum, { item, quantity }) => sum + item.weight * quantity, 0);
       
       lines.push(`【${backpack.name}】 (${formatWeight(bpWeight)} / ${formatWeight(backpack.maxWeight)})`);
       
       if (bpItems.length === 0) {
         lines.push(`  (空背包)`);
       } else {
-        const bpCategories = [...new Set(bpItems.map(i => i.category))];
+        const bpCategories = [...new Set(bpItems.map(({ item }) => item.category))];
         bpCategories.forEach(cat => {
-          const catItems = bpItems.filter(i => i.category === cat);
+          const catItems = bpItems.filter(({ item }) => item.category === cat);
           lines.push(`  ${CATEGORY_LABELS[cat]}:`);
-          catItems.forEach(item => {
-            lines.push(`    □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
+          catItems.forEach(({ item, quantity }) => {
+            lines.push(`    □ ${item.name} x${quantity}  (${formatWeight(item.weight * quantity)})`);
           });
         });
       }
       lines.push('');
     });
 
-    const unassignedItems = personalItems.filter(item => !item.backpackId);
+    const unassignedItems = getUnassignedItems(plan.gearList).filter(
+      ({ item }) => !item.isShared && item.carrierId === memberId
+    );
     if (unassignedItems.length > 0) {
-      lines.push(`【未分配背包】 (${formatWeight(unassignedItems.reduce((s, i) => s + i.weight * i.quantity, 0))})`);
-      const unassignedCategories = [...new Set(unassignedItems.map(i => i.category))];
+      const unassignedWeight = unassignedItems.reduce((s, { item, quantity }) => s + item.weight * quantity, 0);
+      lines.push(`【未分配背包】 (${formatWeight(unassignedWeight)})`);
+      const unassignedCategories = [...new Set(unassignedItems.map(({ item }) => item.category))];
       unassignedCategories.forEach(cat => {
-        const catItems = unassignedItems.filter(i => i.category === cat);
+        const catItems = unassignedItems.filter(({ item }) => item.category === cat);
         lines.push(`  ${CATEGORY_LABELS[cat]}:`);
-        catItems.forEach(item => {
-          lines.push(`    □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
+        catItems.forEach(({ item, quantity }) => {
+          lines.push(`    □ ${item.name} x${quantity}  (${formatWeight(item.weight * quantity)})`);
         });
       });
       lines.push('');

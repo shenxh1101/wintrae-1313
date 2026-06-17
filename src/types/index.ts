@@ -18,12 +18,18 @@ export interface GearItem {
   recommendedPerPersonPerDay?: number;
 }
 
+export interface ItemAllocation {
+  backpackId: string;
+  quantity: number;
+}
+
 export interface ListItem extends GearItem {
   quantity: number;
   carrierId?: string;
   backpackId?: string;
   checked?: boolean;
   keepDuplicate?: boolean;
+  allocations?: ItemAllocation[];
 }
 
 export interface CrewMember {
@@ -87,14 +93,20 @@ export interface ConsumableEstimate {
   isShared: boolean;
   perPersonPerDay?: number;
   perDay?: number;
+  consumableType?: ConsumableType;
+  inList: boolean;
 }
 
 export interface DuplicateItem {
   category: GearCategory;
   itemName: string;
   count: number;
+  totalCount: number;
   itemIds: string[];
   isSharedMixed: boolean;
+  shouldWarn: boolean;
+  reason?: string;
+  distinctCarriers: number;
 }
 
 export const CATEGORY_LABELS: Record<GearCategory, string> = {

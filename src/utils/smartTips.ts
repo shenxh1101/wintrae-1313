@@ -1,8 +1,9 @@
-import { SmartTip, ListItem, CrewMember, Season, CampType, Weather, GearCategory, CATEGORY_LABELS, DuplicateItem, ConsumableType } from '@/types';
+import { SmartTip, ListItem, CrewMember, Season, CampType, Weather, GearCategory, CATEGORY_LABELS, DuplicateItem, ConsumableType, Backpack } from '@/types';
 
 interface TipContext {
   gearList: ListItem[];
   crew: CrewMember[];
+  backpacks: Backpack[];
   season: Season;
   days: number;
   weather: Weather;
@@ -107,76 +108,20 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
     }
   }
 
-  // 4. 重量超限检查（按背包）
-  context.gearList
-    .filter(item => !item.isShared && item.backpackId)
-    .reduce((acc, item) => {
-      const weight = item.weight * item.quantity;
-      acc.set(item.backpackId!, (acc.get(item.backpackId!) || 0) + weight);
-      return acc;
-    }, new Map<string, number>());
-
-  // 5. 易耗品数量检查
-  context.gearList
-    .filter(item => item.isConsumable && item.recommendedPerPersonPerDay && item.quantity > 0 && !item.isShared)
-    .forEach(item => {
-      const recommendedQty = Math.ceil(item.recommendedPerPersonPerDay! * context.days * Math.max(context.crew.length, 1));
-      if (item.quantity < recommendedQty) {
-        addTip(
-          'info',
-          `${item.name}数量可能不足`,
-          `按${context.days}天${context.crew.length}人计算，建议准备${recommendedQty}份，当前只有${item.quantity}份。`,
-          item.category
-        );
-      }
-    });
-
-  context.gearList
-    .filter(item => item.isConsumable && item.recommendedPerDay && item.isShared && item.quantity > 0)
-    .forEach(item => {
-      const recommendedQty = Math.ceil(item.recommendedPerDay! * context.days);
-      if (item.quantity < recommendedQty) {
-        addTip(
-          'info',
-          `${item.name}数量可能不足`,
-          `按${context.days}天计算，建议准备${recommendedQty}份，当前只有${item.quantity}份。`,
-          item.category
-        );
-      }
-    });
-
-  // 6. 同类装备重复携带检测
-  const duplicates = findDuplicateItems(context.gearList);
+  // 4. 同类装备重复携带检测
+  const duplicates = findDuplicateItems(context.gearList, context.backpacks);
   duplicates.forEach(dup => {
-    const hasKeepFlag = dup.itemIds.some(id => {
-      const item = context.gearList.find(i => i.id === id);
-      return item?.keepDuplicate;
-    });
+    if (!dup.shouldWarn) return;
     
-    if (!hasKeepFlag && dup.count > 1) {
-      addTip(
-        'warning',
-        `检测到${dup.itemName}可能重复携带`,
-        `清单中有 ${dup.count} 件${dup.itemName}类装备。如果确实需要多件，可以在装备列表中标记为"保留重复"。`,
-        dup.category
-      );
-    }
+    addTip(
+      'warning',
+      `检测到${dup.itemName}可能重复携带`,
+      `共有 ${dup.totalCount} 件${dup.itemName}。${dup.reason || '如果确实需要多件，可以在装备列表中标记为"保留重复"或分配给不同的人。'}`,
+      dup.category
+    );
   });
 
-  // 7. 天数相关提示
-  if (context.days >= 3) {
-    const hasEnoughFood = context.gearList.filter(item => item.category === 'food').length >= 3;
-    if (!hasEnoughFood) {
-      addTip(
-        'info',
-        '建议准备更多食物',
-        `${context.days}天的行程建议准备充足的食物和水，注意营养搭配。`,
-        'food'
-      );
-    }
-  }
-
-  // 8. 未分配装备提示
+  // 5. 未分配装备提示
   const unassignedCount = context.gearList.filter(
     item => !item.isShared && !item.backpackId
   ).length;
@@ -190,7 +135,20 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
     );
   }
 
-  // 9. 成功提示 - 清单比较完整时
+  // 6. 天数相关提示
+  if (context.days >= 3) {
+    const hasEnoughFood = context.gearList.filter(item => item.category === 'food').length >= 3;
+    if (!hasEnoughFood) {
+      addTip(
+        'info',
+        '建议准备更多食物',
+        `${context.days}天的行程建议准备充足的食物和水，注意营养搭配。`,
+        'food'
+      );
+    }
+  }
+
+  // 7. 成功提示 - 清单比较完整时
   const categoriesWithItems = new Set(context.gearList.filter(i => i.quantity > 0).map(i => i.category));
   if (categoriesWithItems.size >= 5) {
     addTip(
@@ -204,10 +162,13 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
   return tips;
 };
 
-export const findDuplicateItems = (gearList: ListItem[]): DuplicateItem[] => {
+export const findDuplicateItems = (gearList: ListItem[], backpacks: Backpack[] = []): DuplicateItem[] => {
   const categoryMap: Record<string, ListItem[]> = {};
   
   gearList.forEach(item => {
+    if (item.isShared) return;
+    if (item.keepDuplicate) return;
+    
     const key = `${item.category}-${getSimilarityKey(item.name)}`;
     if (!categoryMap[key]) {
       categoryMap[key] = [];
@@ -218,19 +179,57 @@ export const findDuplicateItems = (gearList: ListItem[]): DuplicateItem[] => {
   const duplicates: DuplicateItem[] = [];
   
   Object.entries(categoryMap).forEach(([key, items]) => {
-    if (items.length > 1) {
-      const category = items[0].category;
-      const itemName = getCategoryDisplayName(key, category);
-      const hasMixedShared = items.some(i => i.isShared) && items.some(i => !i.isShared);
-      
-      duplicates.push({
-        category,
-        itemName,
-        count: items.length,
-        itemIds: items.map(i => i.id),
-        isSharedMixed: hasMixedShared,
-      });
+    const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
+    
+    if (totalCount <= 1) return;
+    
+    const category = items[0].category;
+    const itemName = getCategoryDisplayName(key, category);
+    
+    const carrierIds = new Set<string>();
+    items.forEach(item => {
+      if (item.carrierId) {
+        carrierIds.add(item.carrierId);
+      }
+    });
+    
+    const distinctCarriers = carrierIds.size;
+    const hasMixedCarriers = distinctCarriers > 1;
+    
+    let shouldWarn = true;
+    let reason = '';
+    
+    if (hasMixedCarriers && totalCount === distinctCarriers) {
+      shouldWarn = false;
+      reason = '已分配给不同的人';
+    } else if (hasMixedCarriers) {
+      shouldWarn = true;
+      reason = `分配给了 ${distinctCarriers} 个人，但有 ${totalCount} 件`;
+    } else if (items.length === 1 && items[0].quantity > 1) {
+      shouldWarn = true;
+      reason = '同一件装备数量为多件';
+    } else {
+      shouldWarn = true;
+      reason = '多个同类装备都由同一人携带';
     }
+    
+    const allKeepDuplicate = items.every(i => i.keepDuplicate);
+    if (allKeepDuplicate) {
+      shouldWarn = false;
+      reason = '已全部标记为保留重复';
+    }
+    
+    duplicates.push({
+      category,
+      itemName,
+      count: items.length,
+      totalCount,
+      itemIds: items.map(i => i.id),
+      isSharedMixed: false,
+      shouldWarn,
+      reason,
+      distinctCarriers,
+    });
   });
 
   return duplicates;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, Rocket } from 'lucide-react';
 import DestinationInfo from '@/components/DestinationInfo';
 import CrewMembers from '@/components/CrewMembers';
 import GearLibrary from '@/components/GearLibrary';
@@ -11,12 +11,14 @@ import ExportPanel from '@/components/ExportPanel';
 import CheckMode from '@/components/CheckMode';
 import BackpackAllocation from '@/components/BackpackAllocation';
 import ConsumableEstimatePanel from '@/components/ConsumableEstimatePanel';
+import DepartureChecklist from '@/components/DepartureChecklist';
 import { useGearStore } from '@/store/useGearStore';
 
 function App() {
   const toggleCheckMode = useGearStore(state => state.toggleCheckMode);
   const checkMode = useGearStore(state => state.checkMode);
   const [showCheckMode, setShowCheckMode] = useState(false);
+  const [showDepartureChecklist, setShowDepartureChecklist] = useState(false);
 
   const handleCheckMode = () => {
     toggleCheckMode();
@@ -46,8 +48,16 @@ function App() {
             <PlanManager />
             <ExportPanel />
             <button
+              onClick={() => setShowDepartureChecklist(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-camp-orange to-amber-500 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl font-medium transition-all shadow-md hover:shadow-lg"
+            >
+              <Rocket className="w-4 h-4" />
+              出发前核对
+            </button>
+            <button
               onClick={handleCheckMode}
-              className="flex items-center gap-2 px-4 py-2 bg-camp-orange hover:bg-camp-orange/90 text-white rounded-xl font-medium transition-colors"
+              data-check-mode
+              className="flex items-center gap-2 px-4 py-2 bg-forest-500 hover:bg-forest-600 text-white rounded-xl font-medium transition-colors"
             >
               <ClipboardCheck className="w-4 h-4" />
               检查模式
@@ -68,7 +78,9 @@ function App() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SmartTips />
-          <ConsumableEstimatePanel />
+          <div id="consumable-estimate">
+            <ConsumableEstimatePanel />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -85,7 +97,9 @@ function App() {
           </div>
         </div>
 
-        <BackpackAllocation />
+        <div id="backpack-allocation">
+          <BackpackAllocation />
+        </div>
       </main>
 
       <footer className="text-center text-sm text-earth-400 py-4">
@@ -93,6 +107,9 @@ function App() {
       </footer>
 
       {showCheckMode && <CheckMode onClose={handleCloseCheckMode} />}
+      {showDepartureChecklist && (
+        <DepartureChecklist onClose={() => setShowDepartureChecklist(false)} />
+      )}
     </div>
   );
 }

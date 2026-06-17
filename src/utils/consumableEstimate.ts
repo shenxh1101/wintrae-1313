@@ -1,4 +1,5 @@
-import { ListItem, CrewMember, ConsumableEstimate, ConsumableType, CONSUMABLE_TYPE_LABELS, GearCategory } from '@/types';
+import { ListItem, CrewMember, ConsumableEstimate, ConsumableType, CONSUMABLE_TYPE_LABELS, GearCategory, GearItem } from '@/types';
+import { gearLibrary } from '@/data/gearData';
 
 export const calculateConsumableEstimates = (
   gearList: ListItem[],
@@ -6,47 +7,57 @@ export const calculateConsumableEstimates = (
   days: number
 ): ConsumableEstimate[] => {
   const estimates: ConsumableEstimate[] = [];
+  const itemMap = new Map(gearList.map(i => [i.id, i]));
 
-  gearList
-    .filter(item => item.isConsumable)
-    .forEach(item => {
-      let recommendedQty = 0;
-      let perPersonPerDay: number | undefined;
-      let perDay: number | undefined;
+  const allConsumables = gearLibrary.filter(item => item.isConsumable);
 
-      if (item.recommendedPerPersonPerDay && !item.isShared) {
-        perPersonPerDay = item.recommendedPerPersonPerDay;
-        recommendedQty = Math.ceil(item.recommendedPerPersonPerDay * days * Math.max(crew.length, 1));
-      } else if (item.recommendedPerDay && item.isShared) {
-        perDay = item.recommendedPerDay;
-        recommendedQty = Math.ceil(item.recommendedPerDay * days);
-      } else if (item.recommendedPerPersonPerDay && item.isShared) {
-        perDay = item.recommendedPerPersonPerDay * Math.max(crew.length, 1);
-        recommendedQty = Math.ceil(item.recommendedPerPersonPerDay * days * Math.max(crew.length, 1));
-      }
+  allConsumables.forEach(gearItem => {
+    const listItem = itemMap.get(gearItem.id);
+    const currentQty = listItem?.quantity || 0;
+    const inList = !!listItem;
 
-      if (recommendedQty > 0) {
-        estimates.push({
-          itemId: item.id,
-          itemName: item.name,
-          category: item.category,
-          currentQty: item.quantity,
-          recommendedQty,
-          diff: item.quantity - recommendedQty,
-          unitWeight: item.weight,
-          isShared: item.isShared,
-          perPersonPerDay,
-          perDay,
-        });
-      }
-    });
+    let recommendedQty = 0;
+    let perPersonPerDay: number | undefined;
+    let perDay: number | undefined;
+    const isShared = listItem?.isShared ?? gearItem.isShared;
 
-  return estimates.sort((a, b) => a.diff - b.diff);
+    if (gearItem.recommendedPerPersonPerDay && !isShared) {
+      perPersonPerDay = gearItem.recommendedPerPersonPerDay;
+      recommendedQty = Math.ceil(gearItem.recommendedPerPersonPerDay * days * Math.max(crew.length, 1));
+    } else if (gearItem.recommendedPerDay && isShared) {
+      perDay = gearItem.recommendedPerDay;
+      recommendedQty = Math.ceil(gearItem.recommendedPerDay * days);
+    } else if (gearItem.recommendedPerPersonPerDay && isShared) {
+      perDay = gearItem.recommendedPerPersonPerDay * Math.max(crew.length, 1);
+      recommendedQty = Math.ceil(gearItem.recommendedPerPersonPerDay * days * Math.max(crew.length, 1));
+    }
+
+    if (recommendedQty > 0) {
+      estimates.push({
+        itemId: gearItem.id,
+        itemName: gearItem.name,
+        category: gearItem.category,
+        currentQty,
+        recommendedQty,
+        diff: currentQty - recommendedQty,
+        unitWeight: gearItem.weight,
+        isShared,
+        perPersonPerDay,
+        perDay,
+        consumableType: gearItem.consumableType,
+        inList,
+      });
+    }
+  });
+
+  return estimates.sort((a, b) => {
+    if (a.inList !== b.inList) return a.inList ? -1 : 1;
+    return a.diff - b.diff;
+  });
 };
 
 export const getConsumableByType = (
-  estimates: ConsumableEstimate[],
-  gearList: ListItem[]
+  estimates: ConsumableEstimate[]
 ): Record<ConsumableType, ConsumableEstimate[]> => {
   const result: Record<ConsumableType, ConsumableEstimate[]> = {
     water: [],
@@ -57,8 +68,7 @@ export const getConsumableByType = (
   };
 
   estimates.forEach(estimate => {
-    const item = gearList.find(g => g.id === estimate.itemId);
-    const type = item?.consumableType || 'other';
+    const type = estimate.consumableType || 'other';
     result[type].push(estimate);
   });
 
@@ -67,15 +77,17 @@ export const getConsumableByType = (
 
 export const formatEstimateSummary = (
   estimates: ConsumableEstimate[]
-): { totalCurrent: number; totalRecommended: number; totalDiff: number; deficitCount: number } => {
+): { totalCurrent: number; totalRecommended: number; totalDiff: number; deficitCount: number; notInListCount: number } => {
   let totalCurrent = 0;
   let totalRecommended = 0;
   let deficitCount = 0;
+  let notInListCount = 0;
 
   estimates.forEach(e => {
     totalCurrent += e.currentQty;
     totalRecommended += e.recommendedQty;
     if (e.diff < 0) deficitCount++;
+    if (!e.inList) notInListCount++;
   });
 
   return {
@@ -83,5 +95,10 @@ export const formatEstimateSummary = (
     totalRecommended,
     totalDiff: totalCurrent - totalRecommended,
     deficitCount,
+    notInListCount,
   };
+};
+
+export const getGearItemById = (itemId: string): GearItem | undefined => {
+  return gearLibrary.find(g => g.id === itemId);
 };

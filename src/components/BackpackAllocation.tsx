@@ -1,44 +1,47 @@
 import { useState } from 'react';
-import { Backpack, Plus, Trash2, Edit2, Check, X, Package } from 'lucide-react';
+import { Backpack as BackpackIcon, Plus, Trash2, Edit2, Check, X, Package, ChevronDown, ChevronUp } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
-import { formatWeight, getWeightPercentage } from '@/utils/weightCalc';
+import { formatWeight, getWeightPercentage, getBackpackItems, getUnassignedItems } from '@/utils/weightCalc';
 
 const BackpackAllocation = () => {
   const plan = useGearStore(state => state.getCurrentPlan());
   const addBackpack = useGearStore(state => state.addBackpack);
   const removeBackpack = useGearStore(state => state.removeBackpack);
   const updateBackpack = useGearStore(state => state.updateBackpack);
-  const setGearBackpack = useGearStore(state => state.setGearBackpack);
-  const setGearCarrier = useGearStore(state => state.setGearCarrier);
-  const [selectedOwnerId, setSelectedOwnerId] = useState<string>('');
+  const addGearToBackpack = useGearStore(state => state.addGearToBackpack);
+  const removeGearFromBackpack = useGearStore(state => state.removeGearFromBackpack);
+
+  const [selectedOwnerId, setSelectedOwnerId] = useState('');
   const [editingBackpackId, setEditingBackpackId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editMaxWeight, setEditMaxWeight] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [newBackpackName, setNewBackpackName] = useState('');
   const [newBackpackWeight, setNewBackpackWeight] = useState('10000');
+  const [expandedBackpacks, setExpandedBackpacks] = useState<Set<string>>(new Set());
 
   if (!plan) return null;
 
-  const getBackpackItems = (backpackId: string) => {
-    return plan.gearList.filter(item => item.backpackId === backpackId);
+  const toggleBackpackExpand = (backpackId: string) => {
+    const newExpanded = new Set(expandedBackpacks);
+    if (newExpanded.has(backpackId)) {
+      newExpanded.delete(backpackId);
+    } else {
+      newExpanded.add(backpackId);
+    }
+    setExpandedBackpacks(newExpanded);
   };
 
   const getBackpackWeight = (backpackId: string) => {
-    return getBackpackItems(backpackId).reduce(
-      (sum, item) => sum + item.weight * item.quantity, 0
-    );
+    const items = getBackpackItems(backpackId, plan.gearList);
+    return items.reduce((sum, { item, quantity }) => sum + item.weight * quantity, 0);
   };
 
-  const unassignedItems = plan.gearList.filter(
-    item => !item.isShared && !item.backpackId
-  );
-
+  const unassignedItems = getUnassignedItems(plan.gearList);
   const sharedItems = plan.gearList.filter(item => item.isShared);
 
   const handleAddBackpack = () => {
     if (!selectedOwnerId || !newBackpackName) return;
-    
     const maxWeight = parseInt(newBackpackWeight) || 10000;
     addBackpack(newBackpackName, selectedOwnerId, maxWeight);
     setNewBackpackName('');
@@ -47,32 +50,22 @@ const BackpackAllocation = () => {
   };
 
   const handleRemoveBackpack = (backpackId: string) => {
-    if (confirm('确定删除这个背包吗？背包里的装备将变为未分配状态。')) {
+    if (confirm('确定删除这个背包吗？')) {
       removeBackpack(backpackId);
     }
   };
 
-  const startEditBackpack = (backpackId: string, name: string, maxWeight: number) => {
-    setEditingBackpackId(backpackId);
-    setEditName(name);
-    setEditMaxWeight(maxWeight.toString());
+  const startEditBackpack = (backpack: { id: string; name: string; maxWeight: number }) => {
+    setEditingBackpackId(backpack.id);
+    setEditName(backpack.name);
+    setEditMaxWeight(backpack.maxWeight.toString());
   };
 
-  const saveEditBackpack = (backpackId: string) => {
-    if (!editName.trim()) return;
+  const saveEditBackpack = () => {
+    if (!editingBackpackId || !editName.trim()) return;
     const maxWeight = parseInt(editMaxWeight) || 10000;
-    updateBackpack(backpackId, { name: editName.trim(), maxWeight });
+    updateBackpack(editingBackpackId, { name: editName.trim(), maxWeight });
     setEditingBackpackId(null);
-  };
-
-  const handleAssignToBackpack = (itemId: string, backpackId: string | undefined) => {
-    if (backpackId) {
-      const backpack = plan.backpacks.find(b => b.id === backpackId);
-      if (backpack) {
-        setGearCarrier(itemId, backpack.ownerId);
-      }
-    }
-    setGearBackpack(itemId, backpackId);
   };
 
   const getBackpacksByOwner = (ownerId: string) => {
@@ -145,7 +138,7 @@ const BackpackAllocation = () => {
 
       {plan.backpacks.length === 0 ? (
         <div className="text-center py-8 text-earth-400">
-          <Backpack className="w-12 h-12 mx-auto mb-2 opacity-50" />
+          <BackpackIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
           <p>还没有背包</p>
           <p className="text-sm">点击上方按钮添加背包吧</p>
         </div>
@@ -169,25 +162,29 @@ const BackpackAllocation = () => {
                     const weight = getBackpackWeight(backpack.id);
                     const percentage = getWeightPercentage(weight, backpack.maxWeight);
                     const isOverweight = weight > backpack.maxWeight;
-                    const items = getBackpackItems(backpack.id);
+                    const items = getBackpackItems(backpack.id, plan.gearList);
                     const isEditing = editingBackpackId === backpack.id;
+                    const isExpanded = expandedBackpacks.has(backpack.id);
 
                     return (
                       <div
                         key={backpack.id}
-                        className={`p-4 rounded-xl border-2 transition-all ${
+                        className={`rounded-xl border-2 transition-all ${
                           isOverweight
                             ? 'border-red-300 bg-red-50'
                             : 'border-cream-200 bg-cream-50'
                         }`}
                       >
-                        <div className="flex items-start justify-between mb-3">
+                        <button
+                          onClick={() => toggleBackpackExpand(backpack.id)}
+                          className="w-full p-4 flex items-start justify-between text-left"
+                        >
                           <div className="flex items-center gap-3">
                             <div
                               className="w-10 h-10 rounded-lg flex items-center justify-center"
                               style={{ backgroundColor: backpack.color }}
                             >
-                              <Backpack className="w-5 h-5 text-white" />
+                              <BackpackIcon className="w-5 h-5 text-white" />
                             </div>
                             <div>
                               {isEditing ? (
@@ -197,6 +194,7 @@ const BackpackAllocation = () => {
                                   onChange={(e) => setEditName(e.target.value)}
                                   className="w-32 px-2 py-1 text-sm border border-cream-300 rounded focus:outline-none focus:ring-2 focus:ring-forest-400"
                                   autoFocus
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                               ) : (
                                 <h4 className="font-medium text-forest-800">
@@ -210,100 +208,142 @@ const BackpackAllocation = () => {
                                     value={editMaxWeight}
                                     onChange={(e) => setEditMaxWeight(e.target.value)}
                                     className="w-20 px-1 py-0.5 text-xs border border-cream-300 rounded focus:outline-none focus:ring-1 focus:ring-forest-400"
+                                    onClick={(e) => e.stopPropagation()}
                                   />
                                   <span className="text-xs text-earth-500">g</span>
                                 </div>
                               ) : (
                                 <p className="text-xs text-earth-500">
-                                  上限: {formatWeight(backpack.maxWeight)}
+                                  {items.length} 件装备 · 上限: {formatWeight(backpack.maxWeight)}
                                 </p>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            {isEditing ? (
-                              <>
-                                <button
-                                  onClick={() => saveEditBackpack(backpack.id)}
-                                  className="p-1.5 text-green-600 hover:bg-green-100 rounded transition-colors"
-                                >
-                                  <Check className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => setEditingBackpackId(null)}
-                                  className="p-1.5 text-earth-500 hover:bg-earth-200 rounded transition-colors"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </>
+                          
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <div className="text-sm font-medium text-forest-700">
+                                {formatWeight(weight)}
+                              </div>
+                              <div className="text-xs text-earth-500">
+                                {Math.round(percentage)}%
+                              </div>
+                            </div>
+                            {isExpanded ? (
+                              <ChevronUp className="w-4 h-4 text-earth-400 flex-shrink-0" />
                             ) : (
-                              <>
-                                <button
-                                  onClick={() => startEditBackpack(backpack.id, backpack.name, backpack.maxWeight)}
-                                  className="p-1.5 text-earth-400 hover:text-earth-600 hover:bg-cream-100 rounded transition-colors"
-                                  title="编辑"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleRemoveBackpack(backpack.id)}
-                                  className="p-1.5 text-earth-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                                  title="删除"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
+                              <ChevronDown className="w-4 h-4 text-earth-400 flex-shrink-0" />
                             )}
                           </div>
-                        </div>
+                        </button>
 
-                        <div className="space-y-2 mb-3">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-earth-600">当前重量</span>
-                            <span className={`font-medium ${
-                              isOverweight ? 'text-red-600' : 'text-forest-700'
-                            }`}>
-                              {formatWeight(weight)}
-                            </span>
-                          </div>
-                          <div className="h-2.5 bg-white rounded-full overflow-hidden border border-cream-200">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                isOverweight ? 'bg-red-500' : 'bg-forest-500'
-                              }`}
-                              style={{ width: `${Math.min(percentage, 100)}%` }}
-                            />
-                          </div>
-                          {isOverweight && (
-                            <p className="text-xs text-red-500">
-                              ⚠️ 超重 {formatWeight(weight - backpack.maxWeight)}
-                            </p>
-                          )}
+                        <div className="h-2.5 bg-white/50 rounded-b-xl overflow-hidden mx-4 mb-3">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              isOverweight ? 'bg-red-500' : 'bg-forest-500'
+                            }`}
+                            style={{ width: `${Math.min(percentage, 100)}%` }}
+                          />
                         </div>
+                        {isOverweight && (
+                          <p className="text-xs text-red-500 px-4 pb-2">
+                            ⚠️ 超重 {formatWeight(weight - backpack.maxWeight)}
+                          </p>
+                        )}
 
-                        <div className="text-xs text-earth-500 mb-2">
-                          装备 {items.length} 件
-                        </div>
-                        
-                        {items.length > 0 && (
-                          <div className="max-h-32 overflow-y-auto space-y-1">
-                            {items.map(item => (
-                              <div
-                                key={item.id}
-                                className="flex items-center justify-between px-2 py-1 bg-white/60 rounded text-sm"
-                              >
-                                <span className="text-forest-700 truncate flex-1">
-                                  {item.name} ×{item.quantity}
-                                </span>
-                                <button
-                                  onClick={() => handleAssignToBackpack(item.id, undefined)}
-                                  className="ml-2 text-earth-400 hover:text-red-500 transition-colors"
-                                  title="移出背包"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
+                        {isExpanded && (
+                          <div className="px-4 pb-4">
+                            {items.length === 0 ? (
+                              <p className="text-sm text-earth-400 text-center py-3">
+                                背包是空的
+                              </p>
+                            ) : (
+                              <div className="space-y-1 max-h-40 overflow-y-auto">
+                                {items.map(({ item, quantity }) => (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-center justify-between px-2 py-1.5 bg-white/60 rounded text-sm"
+                                  >
+                                    <span className="text-forest-700 truncate flex-1">
+                                      {item.name}
+                                    </span>
+                                    <div className="flex items-center bg-white rounded border border-cream-200">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          removeGearFromBackpack(item.id, backpack.id, 1);
+                                        }}
+                                        className="w-5 h-5 flex items-center justify-center text-earth-500 hover:bg-cream-100 rounded-l transition-colors"
+                                      >
+                                        <span className="text-xs">−</span>
+                                      </button>
+                                      <span className="w-6 text-center text-xs font-medium text-forest-700">
+                                        {quantity}
+                                      </span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          addGearToBackpack(item.id, backpack.id, 1);
+                                        }}
+                                        className="w-5 h-5 flex items-center justify-center text-earth-500 hover:bg-cream-100 rounded-r transition-colors"
+                                      >
+                                        <span className="text-xs">+</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
+                            
+                            <div className="flex gap-2 mt-3 pt-3 border-t border-cream-200">
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      saveEditBackpack();
+                                    }}
+                                    className="flex-1 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs rounded-lg transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    保存
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingBackpackId(null);
+                                    }}
+                                    className="flex-1 py-1.5 bg-earth-200 hover:bg-earth-300 text-earth-700 text-xs rounded-lg transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    取消
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditBackpack(backpack);
+                                    }}
+                                    className="flex-1 py-1.5 bg-forest-100 hover:bg-forest-200 text-forest-700 text-xs rounded-lg transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                    编辑
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveBackpack(backpack.id);
+                                    }}
+                                    className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-600 text-xs rounded-lg transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    删除
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -321,7 +361,7 @@ const BackpackAllocation = () => {
           <Package className="w-5 h-5 text-earth-500" />
           <h3 className="font-medium text-forest-800">未分配装备</h3>
           <span className="text-xs text-earth-500">
-            ({unassignedItems.length} 件)
+            ({unassignedItems.reduce((s, { quantity }) => s + quantity, 0)} 件)
           </span>
         </div>
         
@@ -330,26 +370,30 @@ const BackpackAllocation = () => {
             ✅ 所有个人装备都已分配到背包
           </p>
         ) : (
-          <div className="max-h-48 overflow-y-auto space-y-1">
-            {unassignedItems.map(item => (
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {unassignedItems.map(({ item, quantity }) => (
               <div
                 key={item.id}
                 className="flex items-center justify-between px-3 py-2 bg-cream-50 rounded-lg border border-cream-200"
               >
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-forest-700 truncate block">
-                    {item.name} ×{item.quantity}
+                    {item.name}
                   </span>
                   <span className="text-xs text-earth-500">
-                    {formatWeight(item.weight * item.quantity)}
+                    未分配 {quantity} 件 · {formatWeight(item.weight * quantity)}
                   </span>
                 </div>
                 <select
                   value=""
-                  onChange={(e) => handleAssignToBackpack(item.id, e.target.value || undefined)}
-                  className="ml-2 text-xs px-2 py-1 bg-white border border-cream-300 rounded-lg text-earth-600 focus:outline-none focus:ring-2 focus:ring-forest-400"
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addGearToBackpack(item.id, e.target.value, Math.min(quantity, 1));
+                    }
+                  }}
+                  className="text-xs px-2 py-1.5 bg-white border border-cream-300 rounded-lg text-earth-600 focus:outline-none focus:ring-2 focus:ring-forest-400"
                 >
-                  <option value="">分配到...</option>
+                  <option value="">分配...</option>
                   {plan.backpacks.map(bp => {
                     const owner = plan.crew.find(c => c.id === bp.ownerId);
                     return (
@@ -381,7 +425,7 @@ const BackpackAllocation = () => {
       )}
 
       <p className="text-xs text-earth-400 mt-4">
-        💡 提示：点击装备右侧下拉菜单可将其分配到不同背包
+        💡 提示：展开背包可查看和调整装备数量，支持拆分到多个背包
       </p>
     </div>
   );
