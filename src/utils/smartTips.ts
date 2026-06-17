@@ -178,6 +178,10 @@ export const findDuplicateItems = (gearList: ListItem[], backpacks: Backpack[] =
 
   const duplicates: DuplicateItem[] = [];
   
+  const getBackpackOwner = (backpackId: string): string | undefined => {
+    return backpacks.find(b => b.id === backpackId)?.ownerId;
+  };
+  
   Object.entries(categoryMap).forEach(([key, items]) => {
     const totalCount = items.reduce((sum, item) => sum + item.quantity, 0);
     
@@ -187,36 +191,66 @@ export const findDuplicateItems = (gearList: ListItem[], backpacks: Backpack[] =
     const itemName = getCategoryDisplayName(key, category);
     
     const carrierIds = new Set<string>();
+    let unassignedCount = 0;
+    
     items.forEach(item => {
-      if (item.carrierId) {
-        carrierIds.add(item.carrierId);
+      const allocs = item.allocations || [];
+      
+      if (allocs.length === 0) {
+        if (item.carrierId) {
+          carrierIds.add(item.carrierId);
+        } else {
+          unassignedCount += item.quantity;
+        }
+        return;
       }
+      
+      allocs.forEach(alloc => {
+        const ownerId = getBackpackOwner(alloc.backpackId);
+        if (ownerId) {
+          carrierIds.add(ownerId);
+        } else {
+          unassignedCount += alloc.quantity;
+        }
+      });
     });
     
     const distinctCarriers = carrierIds.size;
+    const assignedCount = totalCount - unassignedCount;
     const hasMixedCarriers = distinctCarriers > 1;
     
     let shouldWarn = true;
     let reason = '';
     
-    if (hasMixedCarriers && totalCount === distinctCarriers) {
-      shouldWarn = false;
-      reason = '已分配给不同的人';
-    } else if (hasMixedCarriers) {
-      shouldWarn = true;
-      reason = `分配给了 ${distinctCarriers} 个人，但有 ${totalCount} 件`;
-    } else if (items.length === 1 && items[0].quantity > 1) {
-      shouldWarn = true;
-      reason = '同一件装备数量为多件';
-    } else {
-      shouldWarn = true;
-      reason = '多个同类装备都由同一人携带';
+    if (items.some(i => i.keepDuplicate)) {
+      const allKeep = items.every(i => i.keepDuplicate);
+      if (allKeep) {
+        shouldWarn = false;
+        reason = '已全部标记为保留重复';
+      }
     }
     
-    const allKeepDuplicate = items.every(i => i.keepDuplicate);
-    if (allKeepDuplicate) {
+    if (shouldWarn && hasMixedCarriers && assignedCount === distinctCarriers && unassignedCount === 0) {
       shouldWarn = false;
-      reason = '已全部标记为保留重复';
+      reason = '已分配给不同的人，每人一件';
+    } else if (shouldWarn && hasMixedCarriers) {
+      shouldWarn = true;
+      const unassignedNote = unassignedCount > 0 ? `，还有 ${unassignedCount} 件未分配` : '';
+      reason = `分配给了 ${distinctCarriers} 个人，但共有 ${totalCount} 件${unassignedNote}`;
+    } else if (shouldWarn && items.length === 1 && items[0].quantity > 1) {
+      if (distinctCarriers === 0 && unassignedCount === totalCount) {
+        shouldWarn = true;
+        reason = '同一件装备数量为多件，尚未分配';
+      } else if (distinctCarriers === 1) {
+        shouldWarn = true;
+        reason = '同一件装备数量为多件，都由同一人携带';
+      } else {
+        shouldWarn = true;
+        reason = '同一件装备数量为多件';
+      }
+    } else if (shouldWarn) {
+      shouldWarn = true;
+      reason = '多个同类装备都由同一人携带';
     }
     
     duplicates.push({

@@ -19,17 +19,22 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
 
   if (!plan) return null;
 
-  const validItemIds = new Set(plan.gearList.map(i => i.id));
-  const validCheckProgress = Object.entries(plan.checkProgress)
-    .filter(([id]) => validItemIds.has(id));
-  
-  const totalItems = plan.gearList.length;
-  const checkedItems = validCheckProgress.filter(([, checked]) => checked).length;
-  const progress = totalItems > 0 ? (checkedItems / totalItems) * 100 : 0;
+  const getItemChecked = (itemId: string, backpackId?: string | null): boolean => {
+    const allocs = plan.gearList.find(i => i.id === itemId)?.allocations || [];
+    const hasMultipleUnits = allocs.length > 1;
 
-  const handleReset = () => {
-    if (confirm('确定要重置所有检查进度吗？')) {
-      resetCheckProgress();
+    if (hasMultipleUnits || backpackId !== undefined) {
+      let key: string;
+      if (backpackId) {
+        key = `${itemId}:${backpackId}`;
+      } else if (backpackId === null) {
+        key = `${itemId}:unassigned`;
+      } else {
+        key = itemId;
+      }
+      return plan.checkProgress[key] ?? false;
+    } else {
+      return plan.checkProgress[itemId] ?? false;
     }
   };
 
@@ -40,17 +45,83 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
     return plan.backpacks.filter(b => b.ownerId === memberId);
   };
 
-  const CheckItemRow = ({ itemId, name, quantity, weight, subInfo }: {
+  const totalCheckUnits = (() => {
+    let count = 0;
+    
+    plan.gearList.forEach(item => {
+      if (item.isShared) {
+        count += 1;
+        return;
+      }
+      
+      const allocs = item.allocations || [];
+      if (allocs.length > 0) {
+        count += allocs.length;
+        const totalAlloc = allocs.reduce((s, a) => s + a.quantity, 0);
+        if (totalAlloc < item.quantity) {
+          count += 1;
+        }
+      } else {
+        count += 1;
+      }
+    });
+    
+    return count;
+  })();
+
+  const checkedUnits = (() => {
+    let count = 0;
+    
+    plan.gearList.forEach(item => {
+      if (item.isShared) {
+        if (plan.checkProgress[item.id]) count += 1;
+        return;
+      }
+      
+      const allocs = item.allocations || [];
+      if (allocs.length > 0) {
+        allocs.forEach(alloc => {
+          const key = `${item.id}:${alloc.backpackId}`;
+          if (plan.checkProgress[key]) count += 1;
+        });
+        const totalAlloc = allocs.reduce((s, a) => s + a.quantity, 0);
+        if (totalAlloc < item.quantity) {
+          const key = `${item.id}:unassigned`;
+          if (plan.checkProgress[key]) count += 1;
+        }
+      } else {
+        if (plan.checkProgress[item.id]) count += 1;
+      }
+    });
+    
+    return count;
+  })();
+
+  const progress = totalCheckUnits > 0 ? (checkedUnits / totalCheckUnits) * 100 : 0;
+
+  const handleReset = () => {
+    if (confirm('确定要重置所有检查进度吗？')) {
+      resetCheckProgress();
+    }
+  };
+
+  const handleToggleCheck = (itemId: string, backpackId?: string | null) => {
+    const currentChecked = getItemChecked(itemId, backpackId);
+    setCheckItem(itemId, !currentChecked, backpackId);
+  };
+
+  const CheckItemRow = ({ itemId, name, quantity, weight, backpackId, subInfo }: {
     itemId: string;
     name: string;
     quantity: number;
     weight: number;
+    backpackId?: string | null;
     subInfo?: string;
   }) => {
-    const isChecked = plan.checkProgress[itemId];
+    const isChecked = getItemChecked(itemId, backpackId);
     return (
       <button
-        onClick={() => setCheckItem(itemId, !isChecked)}
+        onClick={() => handleToggleCheck(itemId, backpackId)}
         className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
           isChecked ? 'bg-green-50' : 'hover:bg-cream-50'
         }`}
@@ -107,7 +178,7 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
               />
             </div>
             <span className="text-sm font-medium">
-              {checkedItems}/{totalItems} 项
+              {checkedUnits}/{totalCheckUnits} 项
             </span>
           </div>
         </div>
@@ -148,7 +219,7 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
                         (sum, { item, quantity }) => sum + item.weight * quantity, 0
                       );
                       const bpChecked = bpItems.filter(
-                        ({ item }) => plan.checkProgress[item.id]
+                        ({ item }) => getItemChecked(item.id, backpack.id)
                       ).length;
 
                       return (
@@ -179,11 +250,12 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
                             <div className="divide-y divide-cream-100">
                               {bpItems.map(({ item, quantity }) => (
                                 <CheckItemRow
-                                  key={item.id}
+                                  key={`${item.id}-${backpack.id}`}
                                   itemId={item.id}
                                   name={item.name}
                                   quantity={quantity}
                                   weight={item.weight * quantity}
+                                  backpackId={backpack.id}
                                 />
                               ))}
                             </div>
@@ -203,18 +275,19 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
                           </div>
                           <span className="text-sm text-earth-500">
                             {memberUnassigned.filter(
-                              ({ item }) => plan.checkProgress[item.id]
+                              ({ item }) => getItemChecked(item.id, null)
                             ).length}/{memberUnassigned.length}
                           </span>
                         </div>
                         <div className="divide-y divide-cream-100">
                           {memberUnassigned.map(({ item, quantity }) => (
                             <CheckItemRow
-                              key={item.id}
+                              key={`${item.id}-unassigned`}
                               itemId={item.id}
                               name={item.name}
                               quantity={quantity}
                               weight={item.weight * quantity}
+                              backpackId={null}
                               subInfo="未分配背包"
                             />
                           ))}

@@ -50,7 +50,7 @@ interface GearState {
   toggleKeepDuplicate: (itemId: string) => void;
   
   toggleCheckMode: () => void;
-  setCheckItem: (itemId: string, checked: boolean) => void;
+  setCheckItem: (itemId: string, checked: boolean, backpackId?: string | null) => void;
   resetCheckProgress: () => void;
   cleanupCheckProgress: () => void;
   
@@ -367,10 +367,31 @@ export const useGearStore = create<GearState>((set, get) => {
             ? {
                 ...p,
                 backpacks: p.backpacks.filter(b => b.id !== backpackId),
-                gearList: p.gearList.map(item =>
-                  item.backpackId === backpackId
-                    ? { ...item, backpackId: undefined }
-                    : item
+                gearList: p.gearList.map(item => {
+                  if (!item.allocations || item.allocations.length === 0) {
+                    return item.backpackId === backpackId
+                      ? { ...item, backpackId: undefined }
+                      : item;
+                  }
+                  
+                  const newAllocations = item.allocations.filter(
+                    a => a.backpackId !== backpackId
+                  );
+                  const firstBackpack = newAllocations.length > 0 
+                    ? newAllocations[0].backpackId 
+                    : undefined;
+                  
+                  return {
+                    ...item,
+                    backpackId: firstBackpack,
+                    allocations: newAllocations,
+                  };
+                }),
+                checkProgress: Object.fromEntries(
+                  Object.entries(p.checkProgress).filter(([key]) => {
+                    const [itemId, bpId] = key.split(':');
+                    return bpId !== backpackId;
+                  })
                 ),
               }
             : p
@@ -430,7 +451,12 @@ export const useGearStore = create<GearState>((set, get) => {
           if (p.id !== state.currentPlanId) return p;
           
           const newCheckProgress = { ...p.checkProgress };
-          delete newCheckProgress[itemId];
+          Object.keys(newCheckProgress).forEach(key => {
+            const [keyItemId] = key.split(':');
+            if (keyItemId === itemId) {
+              delete newCheckProgress[key];
+            }
+          });
           
           return {
             ...p,
@@ -452,10 +478,16 @@ export const useGearStore = create<GearState>((set, get) => {
         const item = plan.gearList.find(i => i.id === itemId);
         if (!item) return plan;
 
-        let newAllocations = item.allocations || [];
-        const totalAlloc = newAllocations.reduce((s, a) => s + a.quantity, 0);
+        let allocs = item.allocations || [];
+        
+        if (allocs.length === 0 && item.backpackId) {
+          allocs = [{ backpackId: item.backpackId, quantity: item.quantity }];
+        }
 
-        if (quantity > totalAlloc && totalAlloc > 0) {
+        const totalAlloc = allocs.reduce((s, a) => s + a.quantity, 0);
+        let newAllocations = [...allocs];
+
+        if (quantity > totalAlloc) {
           const diff = quantity - totalAlloc;
           if (newAllocations.length > 0) {
             newAllocations = newAllocations.map((a, idx) =>
@@ -464,16 +496,15 @@ export const useGearStore = create<GearState>((set, get) => {
           }
         } else if (quantity < totalAlloc) {
           let remaining = totalAlloc - quantity;
-          const newAllocs = [...newAllocations];
-          for (let i = newAllocs.length - 1; i >= 0 && remaining > 0; i--) {
-            const reduce = Math.min(remaining, newAllocs[i].quantity);
-            newAllocs[i] = { ...newAllocs[i], quantity: newAllocs[i].quantity - reduce };
+          for (let i = newAllocations.length - 1; i >= 0 && remaining > 0; i--) {
+            const reduce = Math.min(remaining, newAllocations[i].quantity);
+            newAllocations[i] = { ...newAllocations[i], quantity: newAllocations[i].quantity - reduce };
             remaining -= reduce;
           }
-          newAllocations = newAllocs.filter(a => a.quantity > 0);
+          newAllocations = newAllocations.filter(a => a.quantity > 0);
         }
 
-        const firstBackpack = newAllocations.length > 0 ? newAllocations[0].backpackId : item.backpackId;
+        const firstBackpack = newAllocations.length > 0 ? newAllocations[0].backpackId : undefined;
 
         return {
           ...plan,
@@ -643,11 +674,25 @@ export const useGearStore = create<GearState>((set, get) => {
       set(state => ({ checkMode: !state.checkMode }));
     },
 
-    setCheckItem: (itemId: string, checked: boolean) => {
-      updateCurrentPlan(plan => ({
-        ...plan,
-        checkProgress: { ...plan.checkProgress, [itemId]: checked },
-      }));
+    setCheckItem: (itemId: string, checked: boolean, backpackId?: string | null) => {
+      updateCurrentPlan(plan => {
+        const item = plan.gearList.find(i => i.id === itemId);
+        if (!item) return plan;
+
+        let key: string;
+        if (backpackId) {
+          key = `${itemId}:${backpackId}`;
+        } else if (backpackId === null) {
+          key = `${itemId}:unassigned`;
+        } else {
+          key = itemId;
+        }
+
+        return {
+          ...plan,
+          checkProgress: { ...plan.checkProgress, [key]: checked },
+        };
+      });
     },
 
     resetCheckProgress: () => {
@@ -662,11 +707,20 @@ export const useGearStore = create<GearState>((set, get) => {
       if (!plan) return;
       
       const validItemIds = new Set(plan.gearList.map(i => i.id));
+      const validBackpackIds = new Set(plan.backpacks.map(b => b.id));
       const cleanedProgress: Record<string, boolean> = {};
       
-      Object.entries(plan.checkProgress).forEach(([id, checked]) => {
-        if (validItemIds.has(id)) {
-          cleanedProgress[id] = checked;
+      Object.entries(plan.checkProgress).forEach(([key, checked]) => {
+        const [itemId, bpId] = key.split(':');
+        
+        if (!validItemIds.has(itemId)) return;
+        
+        if (bpId === undefined) {
+          cleanedProgress[key] = checked;
+        } else if (bpId === 'unassigned') {
+          cleanedProgress[key] = checked;
+        } else if (validBackpackIds.has(bpId)) {
+          cleanedProgress[key] = checked;
         }
       });
       
