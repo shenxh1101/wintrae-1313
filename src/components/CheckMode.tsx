@@ -1,6 +1,8 @@
-import { CheckCircle, Circle, RotateCcw, X } from 'lucide-react';
+import { useEffect } from 'react';
+import { CheckCircle, Circle, RotateCcw, X, Backpack as BackpackIcon } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
 import { CATEGORY_LABELS, GearCategory } from '@/types';
+import { formatWeight } from '@/utils/weightCalc';
 
 interface CheckModeProps {
   onClose: () => void;
@@ -10,14 +12,22 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
   const plan = useGearStore(state => state.getCurrentPlan());
   const setCheckItem = useGearStore(state => state.setCheckItem);
   const resetCheckProgress = useGearStore(state => state.resetCheckProgress);
+  const cleanupCheckProgress = useGearStore(state => state.cleanupCheckProgress);
+
+  useEffect(() => {
+    cleanupCheckProgress();
+  }, [cleanupCheckProgress]);
 
   if (!plan) return null;
 
+  const validItemIds = new Set(plan.gearList.map(i => i.id));
+  const validCheckProgress = Object.entries(plan.checkProgress)
+    .filter(([id]) => validItemIds.has(id));
+  
   const totalItems = plan.gearList.length;
-  const checkedItems = Object.values(plan.checkProgress).filter(Boolean).length;
+  const checkedItems = validCheckProgress.filter(([, checked]) => checked).length;
   const progress = totalItems > 0 ? (checkedItems / totalItems) * 100 : 0;
 
-  // 按类别分组
   const categories = Object.keys(CATEGORY_LABELS) as GearCategory[];
   const itemsByCategory = categories.map(cat => ({
     category: cat,
@@ -30,10 +40,16 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
     }
   };
 
+  const getBackpackName = (backpackId?: string) => {
+    if (!backpackId) return '未分配';
+    const backpack = plan.backpacks.find(b => b.id === backpackId);
+    if (!backpack) return '未分配';
+    return backpack.name;
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white rounded-2xl shadow-hover w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-        {/* 头部 */}
         <div className="p-4 border-b border-cream-200 bg-forest-500 text-white">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xl font-bold flex items-center gap-2">
@@ -48,7 +64,6 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
             </button>
           </div>
           
-          {/* 进度条 */}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-3 bg-white/30 rounded-full overflow-hidden">
               <div
@@ -62,7 +77,6 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
           </div>
         </div>
 
-        {/* 内容 */}
         <div className="flex-1 overflow-y-auto p-4">
           {plan.gearList.length === 0 ? (
             <div className="text-center py-12 text-earth-400">
@@ -102,17 +116,34 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
                             ) : (
                               <Circle className="w-6 h-6 text-earth-300 flex-shrink-0" />
                             )}
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                               <div className={`font-medium ${
                                 isChecked ? 'text-green-700 line-through' : 'text-forest-800'
                               }`}>
                                 {item.name}
                               </div>
-                              <div className="text-xs text-earth-500">
-                                数量: {item.quantity}
-                                {item.isShared && ' · 共享'}
-                                {!item.isShared && item.carrierId && (
-                                  ` · ${plan.crew.find(c => c.id === item.carrierId)?.name || '未分配'}`
+                              <div className="text-xs text-earth-500 flex flex-wrap gap-2">
+                                <span>数量: {item.quantity}</span>
+                                <span>·</span>
+                                <span>{formatWeight(item.weight * item.quantity)}</span>
+                                {item.isShared ? (
+                                  <><span>·</span><span className="text-forest-600">共享装备</span></>
+                                ) : (
+                                  <>
+                                    <span>·</span>
+                                    <span className="text-earth-600">
+                                      {plan.crew.find(c => c.id === item.carrierId)?.name || '未分配'}
+                                    </span>
+                                    {item.backpackId && (
+                                      <>
+                                        <span>·</span>
+                                        <span className="text-forest-600 flex items-center gap-1">
+                                          <BackpackIcon className="w-3 h-3" />
+                                          {getBackpackName(item.backpackId)}
+                                        </span>
+                                      </>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -127,7 +158,6 @@ const CheckMode = ({ onClose }: CheckModeProps) => {
           )}
         </div>
 
-        {/* 底部 */}
         <div className="p-4 border-t border-cream-200 bg-cream-50 flex justify-between">
           <button
             onClick={handleReset}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Minus, Plus, Trash2, Users, User, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { Minus, Plus, Trash2, Users, User, ChevronDown, ChevronUp, Check, Backpack as BackpackIcon, Pin } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
 import { GearCategory, CATEGORY_LABELS, CATEGORY_COLORS } from '@/types';
 import { formatWeight } from '@/utils/weightCalc';
@@ -9,7 +9,9 @@ const GearList = () => {
   const updateGearQuantity = useGearStore(state => state.updateGearQuantity);
   const removeGearItem = useGearStore(state => state.removeGearItem);
   const setGearCarrier = useGearStore(state => state.setGearCarrier);
+  const setGearBackpack = useGearStore(state => state.setGearBackpack);
   const toggleGearShared = useGearStore(state => state.toggleGearShared);
+  const toggleKeepDuplicate = useGearStore(state => state.toggleKeepDuplicate);
   const checkMode = useGearStore(state => state.checkMode);
   const setCheckItem = useGearStore(state => state.setCheckItem);
   const [expandedCategories, setExpandedCategories] = useState<Set<GearCategory>>(
@@ -28,7 +30,6 @@ const GearList = () => {
     setExpandedCategories(newExpanded);
   };
 
-  // 按类别分组
   const categories = Object.keys(CATEGORY_LABELS) as GearCategory[];
   
   const itemsByCategory = categories.map(cat => ({
@@ -37,6 +38,31 @@ const GearList = () => {
   })).filter(group => group.items.length > 0);
 
   const totalItems = plan.gearList.reduce((sum, item) => sum + item.quantity, 0);
+
+  const handleCarrierChange = (itemId: string, carrierId: string | undefined) => {
+    setGearCarrier(itemId, carrierId);
+    if (!carrierId) {
+      setGearBackpack(itemId, undefined);
+    }
+  };
+
+  const handleBackpackChange = (itemId: string, backpackId: string | undefined) => {
+    if (backpackId) {
+      const backpack = plan.backpacks.find(b => b.id === backpackId);
+      if (backpack) {
+        setGearCarrier(itemId, backpack.ownerId);
+      }
+    }
+    setGearBackpack(itemId, backpackId);
+  };
+
+  const getBackpackName = (backpackId?: string) => {
+    if (!backpackId) return '';
+    const backpack = plan.backpacks.find(b => b.id === backpackId);
+    if (!backpack) return '';
+    const owner = plan.crew.find(c => c.id === backpack.ownerId);
+    return `${owner?.name || ''} - ${backpack.name}`;
+  };
 
   if (plan.gearList.length === 0) {
     return (
@@ -71,7 +97,6 @@ const GearList = () => {
 
           return (
             <div key={category} className="border border-cream-200 rounded-xl overflow-hidden">
-              {/* 类别标题 */}
               <button
                 onClick={() => toggleCategory(category)}
                 className="w-full flex items-center gap-3 p-3 bg-cream-50 hover:bg-cream-100 transition-colors"
@@ -96,61 +121,72 @@ const GearList = () => {
                 )}
               </button>
 
-              {/* 装备列表 */}
               {isExpanded && (
                 <div className="divide-y divide-cream-100">
                   {items.map(item => {
                     const isChecked = plan.checkProgress[item.id];
+                    const backpackName = getBackpackName(item.backpackId);
                     
                     return (
                       <div
                         key={item.id}
-                        className={`p-3 flex items-center gap-3 transition-colors ${
+                        className={`p-3 transition-colors ${
                           checkMode && isChecked ? 'bg-green-50' : 'hover:bg-cream-50/50'
                         }`}
                       >
-                        {checkMode && (
-                          <button
-                            onClick={() => setCheckItem(item.id, !isChecked)}
-                            className={`w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                              isChecked
-                                ? 'bg-forest-500 border-forest-500 text-white'
-                                : 'border-earth-300 hover:border-forest-400'
-                            }`}
-                          >
-                            {isChecked && <Check className="w-4 h-4" />}
-                          </button>
-                        )}
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h4 className="font-medium text-forest-800 text-sm truncate">
-                              {item.name}
-                            </h4>
+                        <div className="flex items-center gap-3">
+                          {checkMode && (
                             <button
-                              onClick={() => toggleGearShared(item.id)}
-                              className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs rounded transition-colors ${
-                                item.isShared
-                                  ? 'bg-forest-100 text-forest-700 hover:bg-forest-200'
-                                  : 'bg-earth-100 text-earth-600 hover:bg-earth-200'
+                              onClick={() => setCheckItem(item.id, !isChecked)}
+                              className={`w-6 h-6 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                                isChecked
+                                  ? 'bg-forest-500 border-forest-500 text-white'
+                                  : 'border-earth-300 hover:border-forest-400'
                               }`}
-                              title={item.isShared ? '改为个人携带' : '改为共享装备'}
                             >
-                              {item.isShared ? (
-                                <><Users className="w-3 h-3" /> 共享</>
-                              ) : (
-                                <><User className="w-3 h-3" /> 个人</>
-                              )}
+                              {isChecked && <Check className="w-4 h-4" />}
                             </button>
-                          </div>
-                          <div className="text-xs text-earth-500 mt-0.5">
-                            {formatWeight(item.weight)} × {item.quantity} = {formatWeight(item.weight * item.quantity)}
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-medium text-forest-800 text-sm truncate">
+                                {item.name}
+                              </h4>
+                              <button
+                                onClick={() => toggleGearShared(item.id)}
+                                className={`flex items-center gap-0.5 px-1.5 py-0.5 text-xs rounded transition-colors ${
+                                  item.isShared
+                                    ? 'bg-forest-100 text-forest-700 hover:bg-forest-200'
+                                    : 'bg-earth-100 text-earth-600 hover:bg-earth-200'
+                                }`}
+                                title={item.isShared ? '改为个人携带' : '改为共享装备'}
+                              >
+                                {item.isShared ? (
+                                  <><Users className="w-3 h-3" /> 共享</>
+                                ) : (
+                                  <><User className="w-3 h-3" /> 个人</>
+                                )}
+                              </button>
+                              {!item.isShared && item.keepDuplicate && (
+                                <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 rounded" title="已标记为保留重复">
+                                  <Pin className="w-3 h-3" /> 保留
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-earth-500 mt-0.5">
+                              {formatWeight(item.weight)} × {item.quantity} = {formatWeight(item.weight * item.quantity)}
+                              {backpackName && (
+                                <span className="ml-2 text-forest-600">
+                                  🎒 {backpackName}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
-                        {/* 数量调整 */}
                         {!checkMode && (
-                          <div className="flex items-center gap-2">
+                          <div className="mt-2 flex items-center gap-2 flex-wrap">
                             <div className="flex items-center bg-cream-100 rounded-lg">
                               <button
                                 onClick={() => updateGearQuantity(item.id, item.quantity - 1)}
@@ -169,25 +205,55 @@ const GearList = () => {
                               </button>
                             </div>
 
-                            {/* 携带者选择 */}
                             {!item.isShared && (
-                              <select
-                                value={item.carrierId || ''}
-                                onChange={(e) => setGearCarrier(item.id, e.target.value || undefined)}
-                                className="text-xs px-2 py-1.5 bg-cream-50 border border-cream-300 rounded-lg text-earth-600 focus:outline-none focus:ring-2 focus:ring-forest-400"
-                              >
-                                <option value="">未分配</option>
-                                {plan.crew.map(member => (
-                                  <option key={member.id} value={member.id}>
-                                    {member.name}
-                                  </option>
-                                ))}
-                              </select>
+                              <>
+                                <select
+                                  value={item.carrierId || ''}
+                                  onChange={(e) => handleCarrierChange(item.id, e.target.value || undefined)}
+                                  className="text-xs px-2 py-1.5 bg-cream-50 border border-cream-300 rounded-lg text-earth-600 focus:outline-none focus:ring-2 focus:ring-forest-400"
+                                >
+                                  <option value="">未分配</option>
+                                  {plan.crew.map(member => (
+                                    <option key={member.id} value={member.id}>
+                                      {member.name}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <select
+                                  value={item.backpackId || ''}
+                                  onChange={(e) => handleBackpackChange(item.id, e.target.value || undefined)}
+                                  className="text-xs px-2 py-1.5 bg-cream-50 border border-cream-300 rounded-lg text-earth-600 focus:outline-none focus:ring-2 focus:ring-forest-400"
+                                  disabled={!item.carrierId}
+                                >
+                                  <option value="">选择背包</option>
+                                  {plan.backpacks
+                                    .filter(b => !item.carrierId || b.ownerId === item.carrierId)
+                                    .map(bp => (
+                                      <option key={bp.id} value={bp.id}>
+                                        {bp.name}
+                                      </option>
+                                    ))}
+                                </select>
+
+                                <button
+                                  onClick={() => toggleKeepDuplicate(item.id)}
+                                  className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg transition-colors ${
+                                    item.keepDuplicate
+                                      ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                      : 'bg-earth-100 text-earth-600 hover:bg-earth-200'
+                                  }`}
+                                  title={item.keepDuplicate ? '取消保留重复' : '标记为保留重复'}
+                                >
+                                  <Pin className="w-3 h-3" />
+                                  {item.keepDuplicate ? '已保留' : '保留重复'}
+                                </button>
+                              </>
                             )}
 
                             <button
                               onClick={() => removeGearItem(item.id)}
-                              className="p-1.5 text-earth-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              className="p-1.5 text-earth-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors ml-auto"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>

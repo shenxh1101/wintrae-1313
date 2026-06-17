@@ -1,8 +1,9 @@
-import { ListItem, CrewMember, WeightBreakdown, GearCategory } from '@/types';
+import { ListItem, CrewMember, WeightBreakdown, GearCategory, Backpack } from '@/types';
 
 export const calculateWeight = (
   gearList: ListItem[],
-  crew: CrewMember[]
+  crew: CrewMember[],
+  backpacks: Backpack[] = []
 ): WeightBreakdown => {
   const byCategory: Record<GearCategory, number> = {
     tent: 0,
@@ -19,7 +20,13 @@ export const calculateWeight = (
     byPerson[member.id] = 0;
   });
 
+  const byBackpack: Record<string, number> = {};
+  backpacks.forEach(bp => {
+    byBackpack[bp.id] = 0;
+  });
+
   let total = 0;
+  let unassigned = 0;
 
   gearList.forEach(item => {
     const itemWeight = item.weight * item.quantity;
@@ -31,8 +38,17 @@ export const calculateWeight = (
       crew.forEach(member => {
         byPerson[member.id] += shareWeight;
       });
+      unassigned += itemWeight;
     } else if (item.carrierId && byPerson[item.carrierId] !== undefined) {
       byPerson[item.carrierId] += itemWeight;
+      
+      if (item.backpackId && byBackpack[item.backpackId] !== undefined) {
+        byBackpack[item.backpackId] += itemWeight;
+      } else {
+        unassigned += itemWeight;
+      }
+    } else {
+      unassigned += itemWeight;
     }
   });
 
@@ -43,6 +59,8 @@ export const calculateWeight = (
     perPerson,
     byCategory,
     byPerson,
+    byBackpack,
+    unassigned,
   };
 };
 
@@ -56,4 +74,17 @@ export const formatWeight = (grams: number): string => {
 export const getWeightPercentage = (current: number, max: number): number => {
   if (max <= 0) return 0;
   return Math.min((current / max) * 100, 100);
+};
+
+export const getBackpackWeight = (
+  backpackId: string,
+  gearList: ListItem[]
+): number => {
+  return gearList
+    .filter(item => item.backpackId === backpackId)
+    .reduce((sum, item) => sum + item.weight * item.quantity, 0);
+};
+
+export const getUnassignedItems = (gearList: ListItem[]): ListItem[] => {
+  return gearList.filter(item => !item.isShared && !item.backpackId);
 };

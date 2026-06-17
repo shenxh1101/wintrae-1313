@@ -1,9 +1,8 @@
-import { AlertTriangle, Info, CheckCircle, XCircle, X } from 'lucide-react';
+import { AlertTriangle, Info, CheckCircle, XCircle, X, EyeOff } from 'lucide-react';
 import { useGearStore } from '@/store/useGearStore';
 import { generateSmartTips } from '@/utils/smartTips';
 import { calculateWeight } from '@/utils/weightCalc';
 import { SmartTip } from '@/types';
-import { useState } from 'react';
 
 const tipIcons = {
   warning: <AlertTriangle className="w-5 h-5" />,
@@ -28,13 +27,14 @@ const tipIconColors = {
 
 const SmartTips = () => {
   const plan = useGearStore(state => state.getCurrentPlan());
-  const [dismissedTips, setDismissedTips] = useState<Set<string>>(new Set());
+  const ignoreTip = useGearStore(state => state.ignoreTip);
+  const unignoreTip = useGearStore(state => state.unignoreTip);
 
   if (!plan) return null;
 
-  const { total, perPerson } = calculateWeight(plan.gearList, plan.crew);
+  const { total, perPerson } = calculateWeight(plan.gearList, plan.crew, plan.backpacks);
 
-  const tips = generateSmartTips({
+  const allTips = generateSmartTips({
     gearList: plan.gearList,
     crew: plan.crew,
     season: plan.destination.season,
@@ -43,13 +43,23 @@ const SmartTips = () => {
     campType: plan.destination.campType,
     totalWeight: total,
     perPersonWeight: perPerson,
-  }).filter(tip => !dismissedTips.has(tip.id));
+  });
 
-  const dismissTip = (tipId: string) => {
-    setDismissedTips(prev => new Set(prev).add(tipId));
+  const tips = allTips.filter(tip => !plan.ignoredTips.includes(tip.id));
+  const ignoredCount = allTips.length - tips.length;
+
+  const handleIgnore = (tipId: string) => {
+    ignoreTip(tipId);
   };
 
-  if (tips.length === 0) {
+  const handleShowIgnored = () => {
+    const ignoredTipIds = allTips
+      .filter(t => plan.ignoredTips.includes(t.id))
+      .map(t => t.id);
+    ignoredTipIds.forEach(id => unignoreTip(id));
+  };
+
+  if (tips.length === 0 && ignoredCount === 0) {
     return (
       <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
         <div className="flex items-center gap-3">
@@ -77,6 +87,15 @@ const SmartTips = () => {
             </span>
           )}
         </h3>
+        {ignoredCount > 0 && (
+          <button
+            onClick={handleShowIgnored}
+            className="flex items-center gap-1 text-xs text-earth-500 hover:text-earth-700 transition-colors"
+          >
+            <EyeOff className="w-3.5 h-3.5" />
+            显示已忽略 ({ignoredCount})
+          </button>
+        )}
       </div>
 
       <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -85,12 +104,15 @@ const SmartTips = () => {
             key={tip.id}
             className={`p-3 rounded-xl border ${tipStyles[tip.type]} animate-slide-in relative group`}
           >
-            <button
-              onClick={() => dismissTip(tip.id)}
-              className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/10"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            {tip.dismissible !== false && (
+              <button
+                onClick={() => handleIgnore(tip.id)}
+                className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/10"
+                title="忽略此提示"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
             
             <div className="flex items-start gap-3">
               <div className={`flex-shrink-0 mt-0.5 ${tipIconColors[tip.type]}`}>

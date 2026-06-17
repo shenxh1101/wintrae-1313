@@ -1,4 +1,4 @@
-import { Plan, ListItem, CrewMember, CATEGORY_LABELS, SEASON_LABELS, WEATHER_LABELS, CAMPTYPE_LABELS } from '@/types';
+import { Plan, ListItem, CrewMember, CATEGORY_LABELS, SEASON_LABELS, WEATHER_LABELS, CAMPTYPE_LABELS, Backpack } from '@/types';
 import { formatWeight } from './weightCalc';
 
 export const exportAsText = (plan: Plan): string => {
@@ -14,7 +14,6 @@ export const exportAsText = (plan: Plan): string => {
   lines.push(`同行人数：${plan.crew.length}人`);
   lines.push('');
 
-  // 按类别分组
   const categories = [...new Set(plan.gearList.map(item => item.category))];
   
   categories.forEach(category => {
@@ -26,15 +25,18 @@ export const exportAsText = (plan: Plan): string => {
       const carrier = item.carrierId 
         ? ` - 携带者: ${plan.crew.find(c => c.id === item.carrierId)?.name || '未分配'}`
         : item.isShared ? ' - 全队共享' : '';
+      const backpack = item.backpackId
+        ? ` - 背包: ${plan.backpacks.find(b => b.id === item.backpackId)?.name || '未知'}`
+        : '';
       const weight = ` (${formatWeight(item.weight * item.quantity)})`;
-      lines.push(`  ${shared} ${item.name} x${item.quantity}${weight}${carrier}`);
+      lines.push(`  ${shared} ${item.name} x${item.quantity}${weight}${carrier}${backpack}`);
     });
     lines.push('');
   });
 
-  // 按人汇总
   lines.push('── 个人装备汇总 ──');
   plan.crew.forEach(member => {
+    const memberBackpacks = plan.backpacks.filter(b => b.ownerId === member.id);
     const personalItems = plan.gearList.filter(
       item => !item.isShared && item.carrierId === member.id
     );
@@ -51,10 +53,18 @@ export const exportAsText = (plan: Plan): string => {
     lines.push(`    个人装备: ${formatWeight(personalWeight)}`);
     lines.push(`    分摊共享: ${formatWeight(sharedWeight)}`);
     lines.push(`    总计: ${formatWeight(personalWeight + sharedWeight)} / ${formatWeight(member.maxWeight)}`);
+    
+    if (memberBackpacks.length > 0) {
+      lines.push(`    背包明细:`);
+      memberBackpacks.forEach(bp => {
+        const bpItems = plan.gearList.filter(item => item.backpackId === bp.id);
+        const bpWeight = bpItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+        lines.push(`      [${bp.name}]: ${formatWeight(bpWeight)} / ${formatWeight(bp.maxWeight)} (${bpItems.length}件)`);
+      });
+    }
     lines.push('');
   });
 
-  // 总重量
   const totalWeight = plan.gearList.reduce(
     (sum, item) => sum + item.weight * item.quantity, 0
   );
@@ -69,6 +79,8 @@ export const exportByPerson = (plan: Plan, memberId: string): string => {
   const member = plan.crew.find(c => c.id === memberId);
   if (!member) return '';
 
+  const memberBackpacks = plan.backpacks.filter(b => b.ownerId === memberId);
+
   const lines: string[] = [];
   
   lines.push(`═══ ${member.name}的装备清单 ═══`);
@@ -77,22 +89,58 @@ export const exportByPerson = (plan: Plan, memberId: string): string => {
   lines.push(`行程：${plan.destination.days}天 ${SEASON_LABELS[plan.destination.season]}`);
   lines.push('');
 
-  // 个人装备
-  lines.push('── 个人装备 ──');
   const personalItems = plan.gearList.filter(
     item => !item.isShared && item.carrierId === memberId
   );
-  
-  const personalCategories = [...new Set(personalItems.map(i => i.category))];
-  personalCategories.forEach(cat => {
-    lines.push(`【${CATEGORY_LABELS[cat]}】`);
-    personalItems.filter(i => i.category === cat).forEach(item => {
-      lines.push(`  □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
-    });
-  });
-  lines.push('');
 
-  // 共享装备
+  lines.push('── 个人装备（按背包）──');
+  
+  if (memberBackpacks.length > 0) {
+    memberBackpacks.forEach(backpack => {
+      const bpItems = personalItems.filter(item => item.backpackId === backpack.id);
+      const bpWeight = bpItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
+      
+      lines.push(`【${backpack.name}】 (${formatWeight(bpWeight)} / ${formatWeight(backpack.maxWeight)})`);
+      
+      if (bpItems.length === 0) {
+        lines.push(`  (空背包)`);
+      } else {
+        const bpCategories = [...new Set(bpItems.map(i => i.category))];
+        bpCategories.forEach(cat => {
+          const catItems = bpItems.filter(i => i.category === cat);
+          lines.push(`  ${CATEGORY_LABELS[cat]}:`);
+          catItems.forEach(item => {
+            lines.push(`    □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
+          });
+        });
+      }
+      lines.push('');
+    });
+
+    const unassignedItems = personalItems.filter(item => !item.backpackId);
+    if (unassignedItems.length > 0) {
+      lines.push(`【未分配背包】 (${formatWeight(unassignedItems.reduce((s, i) => s + i.weight * i.quantity, 0))})`);
+      const unassignedCategories = [...new Set(unassignedItems.map(i => i.category))];
+      unassignedCategories.forEach(cat => {
+        const catItems = unassignedItems.filter(i => i.category === cat);
+        lines.push(`  ${CATEGORY_LABELS[cat]}:`);
+        catItems.forEach(item => {
+          lines.push(`    □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
+        });
+      });
+      lines.push('');
+    }
+  } else {
+    const personalCategories = [...new Set(personalItems.map(i => i.category))];
+    personalCategories.forEach(cat => {
+      lines.push(`【${CATEGORY_LABELS[cat]}】`);
+      personalItems.filter(i => i.category === cat).forEach(item => {
+        lines.push(`  □ ${item.name} x${item.quantity}  (${formatWeight(item.weight * item.quantity)})`);
+      });
+    });
+    lines.push('');
+  }
+
   lines.push('── 共享装备（分摊）──');
   const sharedItems = plan.gearList.filter(item => item.isShared);
   const sharedCategories = [...new Set(sharedItems.map(i => i.category))];
@@ -105,7 +153,6 @@ export const exportByPerson = (plan: Plan, memberId: string): string => {
   });
   lines.push('');
 
-  // 重量汇总
   const personalWeight = personalItems.reduce((sum, item) => sum + item.weight * item.quantity, 0);
   const sharedWeight = sharedItems.reduce((sum, item) => sum + item.weight * item.quantity, 0) / plan.crew.length;
   

@@ -101,6 +101,7 @@ export const gearLibrary: GearItem[] = [
     weight: 350,
     isShared: true,
     isConsumable: true,
+    consumableType: 'fuel',
     recommendedPerDay: 0.5,
     description: '扁气罐，可使用约2天',
   },
@@ -230,6 +231,7 @@ export const gearLibrary: GearItem[] = [
     weight: 50,
     isShared: false,
     isConsumable: true,
+    consumableType: 'other',
     description: 'AAA/AA备用电池',
   },
   {
@@ -259,6 +261,7 @@ export const gearLibrary: GearItem[] = [
     weight: 100,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     description: '感冒药、肠胃药、过敏药等',
   },
   {
@@ -268,6 +271,7 @@ export const gearLibrary: GearItem[] = [
     weight: 100,
     isShared: false,
     isConsumable: true,
+    consumableType: 'other',
     description: 'SPF50+防晒霜',
   },
   {
@@ -277,6 +281,7 @@ export const gearLibrary: GearItem[] = [
     weight: 80,
     isShared: false,
     isConsumable: true,
+    consumableType: 'other',
     description: '户外驱蚊液/喷雾',
   },
   {
@@ -286,6 +291,7 @@ export const gearLibrary: GearItem[] = [
     weight: 10,
     isShared: false,
     isConsumable: true,
+    consumableType: 'other',
     description: '防晒润唇膏',
   },
   {
@@ -295,6 +301,8 @@ export const gearLibrary: GearItem[] = [
     weight: 20,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
+    recommendedPerDay: 2,
     description: '各种尺寸创可贴',
   },
   {
@@ -304,6 +312,7 @@ export const gearLibrary: GearItem[] = [
     weight: 30,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     description: '布洛芬/对乙酰氨基酚',
   },
 
@@ -405,7 +414,8 @@ export const gearLibrary: GearItem[] = [
     weight: 80,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 1,
+    consumableType: 'clothing',
+    recommendedPerPersonPerDay: 1,
     description: '户外运动袜',
   },
   {
@@ -415,7 +425,8 @@ export const gearLibrary: GearItem[] = [
     weight: 150,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 1,
+    consumableType: 'clothing',
+    recommendedPerPersonPerDay: 1,
     description: '速干短袖T恤',
   },
   {
@@ -436,7 +447,8 @@ export const gearLibrary: GearItem[] = [
     weight: 1000,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 2,
+    consumableType: 'water',
+    recommendedPerPersonPerDay: 2,
     description: '1L瓶装水',
   },
   {
@@ -446,7 +458,8 @@ export const gearLibrary: GearItem[] = [
     weight: 120,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 2,
+    consumableType: 'food',
+    recommendedPerPersonPerDay: 2,
     description: '速食方便面',
   },
   {
@@ -456,6 +469,7 @@ export const gearLibrary: GearItem[] = [
     weight: 500,
     isShared: true,
     isConsumable: true,
+    consumableType: 'food',
     recommendedPerDay: 0.5,
     description: '真空包装大米',
   },
@@ -466,6 +480,7 @@ export const gearLibrary: GearItem[] = [
     weight: 300,
     isShared: true,
     isConsumable: true,
+    consumableType: 'food',
     description: '肉类/蔬菜罐头',
   },
   {
@@ -475,7 +490,8 @@ export const gearLibrary: GearItem[] = [
     weight: 200,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 1,
+    consumableType: 'food',
+    recommendedPerPersonPerDay: 1,
     description: '早餐面包或饼干',
   },
   {
@@ -485,7 +501,8 @@ export const gearLibrary: GearItem[] = [
     weight: 100,
     isShared: false,
     isConsumable: true,
-    recommendedPerDay: 2,
+    consumableType: 'food',
+    recommendedPerPersonPerDay: 2,
     description: '巧克力、能量棒、坚果等',
   },
   {
@@ -495,6 +512,7 @@ export const gearLibrary: GearItem[] = [
     weight: 50,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     description: '速溶咖啡或茶包',
   },
   {
@@ -504,6 +522,7 @@ export const gearLibrary: GearItem[] = [
     weight: 100,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     description: '盐、油、酱油等',
   },
   {
@@ -513,6 +532,8 @@ export const gearLibrary: GearItem[] = [
     weight: 300,
     isShared: false,
     isConsumable: true,
+    consumableType: 'food',
+    recommendedPerPersonPerDay: 0.5,
     description: '易保存的水果',
   },
 
@@ -596,6 +617,7 @@ export const gearLibrary: GearItem[] = [
     weight: 20,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     recommendedPerDay: 2,
     description: '环保垃圾袋',
   },
@@ -606,6 +628,7 @@ export const gearLibrary: GearItem[] = [
     weight: 100,
     isShared: true,
     isConsumable: true,
+    consumableType: 'other',
     description: '清洁湿纸巾',
   },
   {
@@ -615,6 +638,7 @@ export const gearLibrary: GearItem[] = [
     weight: 200,
     isShared: false,
     isConsumable: true,
+    consumableType: 'other',
     description: '牙刷牙膏、毛巾等',
   },
   {

@@ -7,7 +7,7 @@ const WeightOverview = () => {
 
   if (!plan) return null;
 
-  const { total, perPerson, byCategory, byPerson } = calculateWeight(plan.gearList, plan.crew);
+  const { total, perPerson, byCategory, byPerson, unassigned } = calculateWeight(plan.gearList, plan.crew, plan.backpacks);
 
   // 分类重量排序
   const sortedCategories = Object.entries(byCategory)

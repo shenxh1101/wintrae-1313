@@ -1,4 +1,4 @@
-import { SmartTip, ListItem, CrewMember, Season, CampType, Weather, GearCategory, CATEGORY_LABELS } from '@/types';
+import { SmartTip, ListItem, CrewMember, Season, CampType, Weather, GearCategory, CATEGORY_LABELS, DuplicateItem, ConsumableType } from '@/types';
 
 interface TipContext {
   gearList: ListItem[];
@@ -15,25 +15,24 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
   const tips: SmartTip[] = [];
   let tipId = 0;
 
-  const addTip = (type: SmartTip['type'], title: string, description: string, category?: string) => {
+  const addTip = (type: SmartTip['type'], title: string, description: string, category?: string, dismissible: boolean = true) => {
     tips.push({
       id: `tip-${++tipId}`,
       type,
       title,
       description,
       category,
+      dismissible,
     });
   };
 
   // 1. 检查必备类别是否遗漏
   const essentialCategories: { cat: GearCategory; reason: string }[] = [];
   
-  // 基本必备
   essentialCategories.push({ cat: 'tent', reason: '露营住宿' });
   essentialCategories.push({ cat: 'lighting', reason: '夜间照明' });
   essentialCategories.push({ cat: 'firstaid', reason: '安全保障' });
   
-  // 按营地类型
   if (context.campType === 'mountain' || context.campType === 'desert') {
     essentialCategories.push({ cat: 'cooking', reason: '野外烹饪' });
   }
@@ -108,70 +107,61 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
     }
   }
 
-  // 4. 重量超限检查
-  context.crew.forEach(member => {
-    const personalWeight = context.gearList
-      .filter(item => !item.isShared && item.carrierId === member.id)
-      .reduce((sum, item) => sum + item.weight * item.quantity, 0);
-    
-    const sharedWeight = context.gearList
-      .filter(item => item.isShared)
-      .reduce((sum, item) => sum + item.weight * item.quantity, 0) / Math.max(context.crew.length, 1);
-    
-    const totalPersonalWeight = personalWeight + sharedWeight;
-    
-    if (totalPersonalWeight > member.maxWeight) {
-      addTip(
-        'error',
-        `${member.name}的背包超重`,
-        `${member.name}的背包重量约为${(totalPersonalWeight / 1000).toFixed(1)}kg，超出其承重上限${(member.maxWeight / 1000).toFixed(1)}kg。建议减轻装备或调整分配。`,
-        'other'
-      );
-    }
-  });
+  // 4. 重量超限检查（按背包）
+  context.gearList
+    .filter(item => !item.isShared && item.backpackId)
+    .reduce((acc, item) => {
+      const weight = item.weight * item.quantity;
+      acc.set(item.backpackId!, (acc.get(item.backpackId!) || 0) + weight);
+      return acc;
+    }, new Map<string, number>());
 
   // 5. 易耗品数量检查
   context.gearList
-    .filter(item => item.isConsumable && item.recommendedPerDay && item.quantity > 0)
+    .filter(item => item.isConsumable && item.recommendedPerPersonPerDay && item.quantity > 0 && !item.isShared)
     .forEach(item => {
-      const recommendedQty = Math.ceil(item.recommendedPerDay! * context.days * (item.isShared ? 1 : 1));
-      if (item.isShared) {
-        // 共享易耗品按人头计算
-        const perPersonRec = item.recommendedPerDay! * context.days;
-        const totalRec = Math.ceil(perPersonRec * Math.max(context.crew.length, 1));
-        if (item.quantity < totalRec) {
-          addTip(
-            'info',
-            `${item.name}数量可能不足`,
-            `按${context.days}天${context.crew.length}人计算，建议准备${totalRec}份，当前只有${item.quantity}份。`,
-            item.category
-          );
-        }
+      const recommendedQty = Math.ceil(item.recommendedPerPersonPerDay! * context.days * Math.max(context.crew.length, 1));
+      if (item.quantity < recommendedQty) {
+        addTip(
+          'info',
+          `${item.name}数量可能不足`,
+          `按${context.days}天${context.crew.length}人计算，建议准备${recommendedQty}份，当前只有${item.quantity}份。`,
+          item.category
+        );
       }
     });
 
-  // 6. 重复携带检查（共享装备被多个人添加为个人装备）
-  const sharedGearIds = context.gearList.filter(item => item.isShared).map(item => item.id);
-  const duplicateItems: string[] = [];
-  
-  context.gearList.forEach(item => {
-    if (!item.isShared && sharedGearIds.includes(item.id)) {
-      // 检查是否为同一件装备但被标记为个人
-      const baseItem = context.gearList.find(g => g.id === item.id && g.isShared);
-      if (baseItem) {
-        duplicateItems.push(item.name);
+  context.gearList
+    .filter(item => item.isConsumable && item.recommendedPerDay && item.isShared && item.quantity > 0)
+    .forEach(item => {
+      const recommendedQty = Math.ceil(item.recommendedPerDay! * context.days);
+      if (item.quantity < recommendedQty) {
+        addTip(
+          'info',
+          `${item.name}数量可能不足`,
+          `按${context.days}天计算，建议准备${recommendedQty}份，当前只有${item.quantity}份。`,
+          item.category
+        );
       }
+    });
+
+  // 6. 同类装备重复携带检测
+  const duplicates = findDuplicateItems(context.gearList);
+  duplicates.forEach(dup => {
+    const hasKeepFlag = dup.itemIds.some(id => {
+      const item = context.gearList.find(i => i.id === id);
+      return item?.keepDuplicate;
+    });
+    
+    if (!hasKeepFlag && dup.count > 1) {
+      addTip(
+        'warning',
+        `检测到${dup.itemName}可能重复携带`,
+        `清单中有 ${dup.count} 件${dup.itemName}类装备。如果确实需要多件，可以在装备列表中标记为"保留重复"。`,
+        dup.category
+      );
     }
   });
-
-  if (duplicateItems.length > 0) {
-    addTip(
-      'warning',
-      '存在重复携带的装备',
-      `以下装备既作为共享装备又作为个人装备：${duplicateItems.join('、')}。请确认是否需要重复携带。`,
-      'other'
-    );
-  }
 
   // 7. 天数相关提示
   if (context.days >= 3) {
@@ -186,7 +176,21 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
     }
   }
 
-  // 8. 成功提示 - 清单比较完整时
+  // 8. 未分配装备提示
+  const unassignedCount = context.gearList.filter(
+    item => !item.isShared && !item.backpackId
+  ).length;
+  
+  if (unassignedCount > 0) {
+    addTip(
+      'info',
+      `${unassignedCount}件装备未分配背包`,
+      '请前往背包分配页面，将装备分配到具体背包中。',
+      'other'
+    );
+  }
+
+  // 9. 成功提示 - 清单比较完整时
   const categoriesWithItems = new Set(context.gearList.filter(i => i.quantity > 0).map(i => i.category));
   if (categoriesWithItems.size >= 5) {
     addTip(
@@ -198,4 +202,78 @@ export const generateSmartTips = (context: TipContext): SmartTip[] => {
   }
 
   return tips;
+};
+
+export const findDuplicateItems = (gearList: ListItem[]): DuplicateItem[] => {
+  const categoryMap: Record<string, ListItem[]> = {};
+  
+  gearList.forEach(item => {
+    const key = `${item.category}-${getSimilarityKey(item.name)}`;
+    if (!categoryMap[key]) {
+      categoryMap[key] = [];
+    }
+    categoryMap[key].push(item);
+  });
+
+  const duplicates: DuplicateItem[] = [];
+  
+  Object.entries(categoryMap).forEach(([key, items]) => {
+    if (items.length > 1) {
+      const category = items[0].category;
+      const itemName = getCategoryDisplayName(key, category);
+      const hasMixedShared = items.some(i => i.isShared) && items.some(i => !i.isShared);
+      
+      duplicates.push({
+        category,
+        itemName,
+        count: items.length,
+        itemIds: items.map(i => i.id),
+        isSharedMixed: hasMixedShared,
+      });
+    }
+  });
+
+  return duplicates;
+};
+
+const getSimilarityKey = (name: string): string => {
+  const keywords: Record<string, string[]> = {
+    'tent': ['帐篷', '天幕'],
+    'sleeping-bag': ['睡袋'],
+    'sleeping-pad': ['防潮垫', '睡垫'],
+    'stove': ['炉头', '炉具', '炉子'],
+    'pot': ['套锅', '锅'],
+    'light': ['露营灯', '头灯', '手电', '灯'],
+    'chair': ['椅子', '折叠椅'],
+    'table': ['桌子', '折叠桌'],
+    'backpack': ['背包', '登山包'],
+    'water-bottle': ['水壶', '水袋'],
+  };
+
+  for (const [key, words] of Object.entries(keywords)) {
+    if (words.some(word => name.includes(word))) {
+      return key;
+    }
+  }
+  
+  return name.slice(0, 2);
+};
+
+const getCategoryDisplayName = (key: string, category: GearCategory): string => {
+  const keyPart = key.split('-').slice(1).join('-');
+  
+  const displayNames: Record<string, string> = {
+    'tent': '帐篷/天幕',
+    'sleeping-bag': '睡袋',
+    'sleeping-pad': '睡垫/防潮垫',
+    'stove': '炉具',
+    'pot': '炊具',
+    'light': '照明设备',
+    'chair': '椅子',
+    'table': '桌子',
+    'backpack': '背包',
+    'water-bottle': '水壶',
+  };
+
+  return displayNames[keyPart] || CATEGORY_LABELS[category];
 };

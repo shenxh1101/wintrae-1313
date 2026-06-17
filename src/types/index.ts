@@ -3,6 +3,7 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 export type Weather = 'sunny' | 'rainy' | 'snowy';
 export type CampType = 'mountain' | 'lake' | 'campground' | 'desert';
 export type TipType = 'warning' | 'info' | 'success' | 'error';
+export type ConsumableType = 'water' | 'food' | 'fuel' | 'clothing' | 'other';
 
 export interface GearItem {
   id: string;
@@ -11,8 +12,10 @@ export interface GearItem {
   weight: number;
   isShared: boolean;
   isConsumable: boolean;
+  consumableType?: ConsumableType;
   description?: string;
   recommendedPerDay?: number;
+  recommendedPerPersonPerDay?: number;
 }
 
 export interface ListItem extends GearItem {
@@ -20,6 +23,7 @@ export interface ListItem extends GearItem {
   carrierId?: string;
   backpackId?: string;
   checked?: boolean;
+  keepDuplicate?: boolean;
 }
 
 export interface CrewMember {
@@ -48,8 +52,10 @@ export interface Plan {
     campType: CampType;
   };
   crew: CrewMember[];
+  backpacks: Backpack[];
   gearList: ListItem[];
   checkProgress: Record<string, boolean>;
+  ignoredTips: string[];
 }
 
 export interface SmartTip {
@@ -58,6 +64,7 @@ export interface SmartTip {
   title: string;
   description: string;
   category?: string;
+  dismissible?: boolean;
 }
 
 export interface WeightBreakdown {
@@ -65,6 +72,29 @@ export interface WeightBreakdown {
   perPerson: number;
   byCategory: Record<GearCategory, number>;
   byPerson: Record<string, number>;
+  byBackpack: Record<string, number>;
+  unassigned: number;
+}
+
+export interface ConsumableEstimate {
+  itemId: string;
+  itemName: string;
+  category: GearCategory;
+  currentQty: number;
+  recommendedQty: number;
+  diff: number;
+  unitWeight: number;
+  isShared: boolean;
+  perPersonPerDay?: number;
+  perDay?: number;
+}
+
+export interface DuplicateItem {
+  category: GearCategory;
+  itemName: string;
+  count: number;
+  itemIds: string[];
+  isSharedMixed: boolean;
 }
 
 export const CATEGORY_LABELS: Record<GearCategory, string> = {
@@ -117,3 +147,22 @@ export const AVATAR_COLORS = [
   '#F39C12',
   '#2C3E50',
 ];
+
+export const BACKPACK_COLORS = [
+  '#417c2c',
+  '#E67E22',
+  '#2980B9',
+  '#8E44AD',
+  '#C0392B',
+  '#16A085',
+  '#7F8C8D',
+  '#F39C12',
+];
+
+export const CONSUMABLE_TYPE_LABELS: Record<ConsumableType, string> = {
+  water: '饮用水',
+  food: '食品',
+  fuel: '燃料',
+  clothing: '衣物',
+  other: '其他',
+};

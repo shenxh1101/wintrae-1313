@@ -3,11 +3,13 @@ import {
   Plan,
   ListItem,
   CrewMember,
+  Backpack,
   Season,
   Weather,
   CampType,
   GearItem,
   AVATAR_COLORS,
+  BACKPACK_COLORS,
 } from '@/types';
 import { gearLibrary } from '@/data/gearData';
 import { loadPlans, savePlans, loadCurrentPlanId, saveCurrentPlanId } from '@/utils/storage';
@@ -33,15 +35,25 @@ interface GearState {
   removeCrewMember: (memberId: string) => void;
   updateCrewMember: (memberId: string, updates: Partial<CrewMember>) => void;
   
-  addGearItem: (gearItem: GearItem, quantity?: number, carrierId?: string) => void;
+  addBackpack: (name: string, ownerId: string, maxWeight: number) => void;
+  removeBackpack: (backpackId: string) => void;
+  updateBackpack: (backpackId: string, updates: Partial<Backpack>) => void;
+  
+  addGearItem: (gearItem: GearItem, quantity?: number, carrierId?: string, backpackId?: string) => void;
   removeGearItem: (itemId: string) => void;
   updateGearQuantity: (itemId: string, quantity: number) => void;
   setGearCarrier: (itemId: string, carrierId: string | undefined) => void;
+  setGearBackpack: (itemId: string, backpackId: string | undefined) => void;
   toggleGearShared: (itemId: string) => void;
+  toggleKeepDuplicate: (itemId: string) => void;
   
   toggleCheckMode: () => void;
   setCheckItem: (itemId: string, checked: boolean) => void;
   resetCheckProgress: () => void;
+  cleanupCheckProgress: () => void;
+  
+  ignoreTip: (tipId: string) => void;
+  unignoreTip: (tipId: string) => void;
   
   setActiveCategory: (category: string) => void;
 }
@@ -56,6 +68,14 @@ const createDefaultPlan = (name: string): Plan => {
     avatarColor: AVATAR_COLORS[0],
   };
 
+  const defaultBackpack: Backpack = {
+    id: generateId(),
+    name: '主背包',
+    ownerId: defaultMember.id,
+    maxWeight: 15000,
+    color: BACKPACK_COLORS[0],
+  };
+
   return {
     id: generateId(),
     name,
@@ -67,8 +87,23 @@ const createDefaultPlan = (name: string): Plan => {
       campType: 'campground',
     },
     crew: [defaultMember],
+    backpacks: [defaultBackpack],
     gearList: [],
     checkProgress: {},
+    ignoredTips: [],
+  };
+};
+
+const migratePlan = (plan: Plan): Plan => {
+  return {
+    ...plan,
+    backpacks: plan.backpacks || [],
+    ignoredTips: plan.ignoredTips || [],
+    checkProgress: plan.checkProgress || {},
+    gearList: plan.gearList.map(item => ({
+      ...item,
+      keepDuplicate: item.keepDuplicate ?? false,
+    })),
   };
 };
 
@@ -77,10 +112,11 @@ const initializeFromStorage = (): { plans: Plan[]; currentPlanId: string | null 
   const savedCurrentId = loadCurrentPlanId();
 
   if (savedPlans.length > 0) {
-    const currentId = savedCurrentId && savedPlans.some(p => p.id === savedCurrentId)
+    const migratedPlans = savedPlans.map(migratePlan);
+    const currentId = savedCurrentId && migratedPlans.some(p => p.id === savedCurrentId)
       ? savedCurrentId
-      : savedPlans[0].id;
-    return { plans: savedPlans, currentPlanId: currentId };
+      : migratedPlans[0].id;
+    return { plans: migratedPlans, currentPlanId: currentId };
   }
 
   const defaultPlan = createDefaultPlan('周末露营');
@@ -89,6 +125,16 @@ const initializeFromStorage = (): { plans: Plan[]; currentPlanId: string | null 
 
 export const useGearStore = create<GearState>((set, get) => {
   const initial = initializeFromStorage();
+
+  const updateCurrentPlan = (updater: (plan: Plan) => Plan) => {
+    set(state => {
+      const newPlans = state.plans.map(p =>
+        p.id === state.currentPlanId ? updater(p) : p
+      );
+      savePlans(newPlans);
+      return { plans: newPlans };
+    });
+  };
 
   return {
     plans: initial.plans,
@@ -107,7 +153,7 @@ export const useGearStore = create<GearState>((set, get) => {
         const newPlans = [...state.plans, newPlan];
         savePlans(newPlans);
         saveCurrentPlanId(newPlan.id);
-        return { plans: newPlans, currentPlanId: newPlan.id };
+        return { plans: newPlans, currentPlanId: newPlan.id, checkMode: false };
       });
     },
 
@@ -118,20 +164,20 @@ export const useGearStore = create<GearState>((set, get) => {
         
         if (state.currentPlanId === planId) {
           newCurrentId = newPlans.length > 0 ? newPlans[0].id : null;
+          if (newCurrentId) {
+            saveCurrentPlanId(newCurrentId);
+          }
         }
         
         savePlans(newPlans);
-        if (newCurrentId) {
-          saveCurrentPlanId(newCurrentId);
-        }
-        
-        return { plans: newPlans, currentPlanId: newCurrentId };
+        return { plans: newPlans, currentPlanId: newCurrentId, checkMode: false };
       });
     },
 
     switchPlan: (planId: string) => {
       set({ currentPlanId: planId, checkMode: false });
       saveCurrentPlanId(planId);
+      setTimeout(() => get().cleanupCheckProgress(), 0);
     },
 
     updatePlanName: (planId: string, name: string) => {
@@ -145,51 +191,31 @@ export const useGearStore = create<GearState>((set, get) => {
     },
 
     setSeason: (season: Season) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, destination: { ...p.destination, season } }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        destination: { ...plan.destination, season },
+      }));
     },
 
     setDays: (days: number) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, destination: { ...p.destination, days: Math.max(1, Math.min(30, days)) } }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        destination: { ...plan.destination, days: Math.max(1, Math.min(30, days)) },
+      }));
     },
 
     setWeather: (weather: Weather) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, destination: { ...p.destination, weather } }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        destination: { ...plan.destination, weather },
+      }));
     },
 
     setCampType: (campType: CampType) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, destination: { ...p.destination, campType } }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        destination: { ...plan.destination, campType },
+      }));
     },
 
     addCrewMember: (name: string, maxWeight: number) => {
@@ -205,9 +231,22 @@ export const useGearStore = create<GearState>((set, get) => {
           avatarColor: AVATAR_COLORS[colorIndex],
         };
 
+        const backpackColorIndex = currentPlan.backpacks.length % BACKPACK_COLORS.length;
+        const newBackpack: Backpack = {
+          id: generateId(),
+          name: `${name}的背包`,
+          ownerId: newMember.id,
+          maxWeight: maxWeight,
+          color: BACKPACK_COLORS[backpackColorIndex],
+        };
+
         const newPlans = state.plans.map(p =>
           p.id === state.currentPlanId
-            ? { ...p, crew: [...p.crew, newMember] }
+            ? { 
+                ...p, 
+                crew: [...p.crew, newMember],
+                backpacks: [...p.backpacks, newBackpack],
+              }
             : p
         );
         savePlans(newPlans);
@@ -220,15 +259,27 @@ export const useGearStore = create<GearState>((set, get) => {
         const currentPlan = state.plans.find(p => p.id === state.currentPlanId);
         if (!currentPlan || currentPlan.crew.length <= 1) return state;
 
+        const backpackIdsToRemove = currentPlan.backpacks
+          .filter(b => b.ownerId === memberId)
+          .map(b => b.id);
+
         const newPlans = state.plans.map(p =>
           p.id === state.currentPlanId
             ? {
                 ...p,
                 crew: p.crew.filter(m => m.id !== memberId),
+                backpacks: p.backpacks.filter(b => b.ownerId !== memberId),
                 gearList: p.gearList.map(item =>
                   item.carrierId === memberId
-                    ? { ...item, carrierId: undefined }
-                    : item
+                    ? { ...item, carrierId: undefined, backpackId: undefined }
+                    : backpackIdsToRemove.includes(item.backpackId || '')
+                      ? { ...item, backpackId: undefined }
+                      : item
+                ),
+                checkProgress: Object.fromEntries(
+                  Object.entries(p.checkProgress).filter(([id]) => 
+                    p.gearList.some(g => g.id === id)
+                  )
                 ),
               }
             : p
@@ -239,13 +290,49 @@ export const useGearStore = create<GearState>((set, get) => {
     },
 
     updateCrewMember: (memberId: string, updates: Partial<CrewMember>) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        crew: plan.crew.map(m =>
+          m.id === memberId ? { ...m, ...updates } : m
+        ),
+      }));
+    },
+
+    addBackpack: (name: string, ownerId: string, maxWeight: number) => {
+      set(state => {
+        const currentPlan = state.plans.find(p => p.id === state.currentPlanId);
+        if (!currentPlan) return state;
+
+        const colorIndex = currentPlan.backpacks.length % BACKPACK_COLORS.length;
+        const newBackpack: Backpack = {
+          id: generateId(),
+          name,
+          ownerId,
+          maxWeight,
+          color: BACKPACK_COLORS[colorIndex],
+        };
+
+        const newPlans = state.plans.map(p =>
+          p.id === state.currentPlanId
+            ? { ...p, backpacks: [...p.backpacks, newBackpack] }
+            : p
+        );
+        savePlans(newPlans);
+        return { plans: newPlans };
+      });
+    },
+
+    removeBackpack: (backpackId: string) => {
       set(state => {
         const newPlans = state.plans.map(p =>
           p.id === state.currentPlanId
             ? {
                 ...p,
-                crew: p.crew.map(m =>
-                  m.id === memberId ? { ...m, ...updates } : m
+                backpacks: p.backpacks.filter(b => b.id !== backpackId),
+                gearList: p.gearList.map(item =>
+                  item.backpackId === backpackId
+                    ? { ...item, backpackId: undefined }
+                    : item
                 ),
               }
             : p
@@ -255,7 +342,16 @@ export const useGearStore = create<GearState>((set, get) => {
       });
     },
 
-    addGearItem: (gearItem: GearItem, quantity: number = 1, carrierId?: string) => {
+    updateBackpack: (backpackId: string, updates: Partial<Backpack>) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        backpacks: plan.backpacks.map(b =>
+          b.id === backpackId ? { ...b, ...updates } : b
+        ),
+      }));
+    },
+
+    addGearItem: (gearItem: GearItem, quantity: number = 1, carrierId?: string, backpackId?: string) => {
       set(state => {
         const currentPlan = state.plans.find(p => p.id === state.currentPlanId);
         if (!currentPlan) return state;
@@ -274,7 +370,8 @@ export const useGearStore = create<GearState>((set, get) => {
             ...gearItem,
             quantity,
             carrierId,
-            checked: false,
+            backpackId,
+            keepDuplicate: false,
           };
           newGearList = [...currentPlan.gearList, newItem];
         }
@@ -291,11 +388,18 @@ export const useGearStore = create<GearState>((set, get) => {
 
     removeGearItem: (itemId: string) => {
       set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, gearList: p.gearList.filter(i => i.id !== itemId) }
-            : p
-        );
+        const newPlans = state.plans.map(p => {
+          if (p.id !== state.currentPlanId) return p;
+          
+          const newCheckProgress = { ...p.checkProgress };
+          delete newCheckProgress[itemId];
+          
+          return {
+            ...p,
+            gearList: p.gearList.filter(i => i.id !== itemId),
+            checkProgress: newCheckProgress,
+          };
+        });
         savePlans(newPlans);
         return { plans: newPlans };
       });
@@ -306,56 +410,55 @@ export const useGearStore = create<GearState>((set, get) => {
         get().removeGearItem(itemId);
         return;
       }
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? {
-                ...p,
-                gearList: p.gearList.map(i =>
-                  i.id === itemId ? { ...i, quantity } : i
-                ),
-              }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        gearList: plan.gearList.map(i =>
+          i.id === itemId ? { ...i, quantity } : i
+        ),
+      }));
     },
 
     setGearCarrier: (itemId: string, carrierId: string | undefined) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? {
-                ...p,
-                gearList: p.gearList.map(i =>
-                  i.id === itemId ? { ...i, carrierId } : i
-                ),
-              }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        gearList: plan.gearList.map(i =>
+          i.id === itemId ? { ...i, carrierId } : i
+        ),
+      }));
+    },
+
+    setGearBackpack: (itemId: string, backpackId: string | undefined) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        gearList: plan.gearList.map(i =>
+          i.id === itemId ? { ...i, backpackId } : i
+        ),
+      }));
     },
 
     toggleGearShared: (itemId: string) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? {
-                ...p,
-                gearList: p.gearList.map(i =>
-                  i.id === itemId
-                    ? { ...i, isShared: !i.isShared, carrierId: !i.isShared ? undefined : i.carrierId }
-                    : i
-                ),
+      updateCurrentPlan(plan => ({
+        ...plan,
+        gearList: plan.gearList.map(i =>
+          i.id === itemId
+            ? { 
+                ...i, 
+                isShared: !i.isShared, 
+                carrierId: !i.isShared ? undefined : i.carrierId,
+                backpackId: !i.isShared ? undefined : i.backpackId,
               }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+            : i
+        ),
+      }));
+    },
+
+    toggleKeepDuplicate: (itemId: string) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        gearList: plan.gearList.map(i =>
+          i.id === itemId ? { ...i, keepDuplicate: !i.keepDuplicate } : i
+        ),
+      }));
     },
 
     toggleCheckMode: () => {
@@ -363,30 +466,50 @@ export const useGearStore = create<GearState>((set, get) => {
     },
 
     setCheckItem: (itemId: string, checked: boolean) => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? {
-                ...p,
-                checkProgress: { ...p.checkProgress, [itemId]: checked },
-              }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
-      });
+      updateCurrentPlan(plan => ({
+        ...plan,
+        checkProgress: { ...plan.checkProgress, [itemId]: checked },
+      }));
     },
 
     resetCheckProgress: () => {
-      set(state => {
-        const newPlans = state.plans.map(p =>
-          p.id === state.currentPlanId
-            ? { ...p, checkProgress: {} }
-            : p
-        );
-        savePlans(newPlans);
-        return { plans: newPlans };
+      updateCurrentPlan(plan => ({
+        ...plan,
+        checkProgress: {},
+      }));
+    },
+
+    cleanupCheckProgress: () => {
+      const plan = get().getCurrentPlan();
+      if (!plan) return;
+      
+      const validItemIds = new Set(plan.gearList.map(i => i.id));
+      const cleanedProgress: Record<string, boolean> = {};
+      
+      Object.entries(plan.checkProgress).forEach(([id, checked]) => {
+        if (validItemIds.has(id)) {
+          cleanedProgress[id] = checked;
+        }
       });
+      
+      updateCurrentPlan(p => ({
+        ...p,
+        checkProgress: cleanedProgress,
+      }));
+    },
+
+    ignoreTip: (tipId: string) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        ignoredTips: [...plan.ignoredTips, tipId],
+      }));
+    },
+
+    unignoreTip: (tipId: string) => {
+      updateCurrentPlan(plan => ({
+        ...plan,
+        ignoredTips: plan.ignoredTips.filter(id => id !== tipId),
+      }));
     },
 
     setActiveCategory: (category: string) => {
