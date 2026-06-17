@@ -50,11 +50,57 @@ const DepartureChecklist = ({ onClose }: DepartureChecklistProps) => {
     !plan.gearList.some(item => item.category === cat && item.quantity > 0)
   );
 
-  const validItemIds = new Set(plan.gearList.map(i => i.id));
-  const validCheckProgress = Object.entries(plan.checkProgress)
-    .filter(([id]) => validItemIds.has(id));
-  const uncheckedCount = validCheckProgress.filter(([, checked]) => !checked).length
-    + (plan.gearList.length - validCheckProgress.length);
+  const validBackpackIds = new Set(plan.backpacks.map(b => b.id));
+  
+  const totalCheckUnits = (() => {
+    let count = 0;
+    plan.gearList.forEach(item => {
+      if (item.isShared) {
+        count += 1;
+        return;
+      }
+      const allocs = item.allocations || [];
+      if (allocs.length > 0) {
+        count += allocs.length;
+        const totalAlloc = allocs.reduce((s, a) => s + a.quantity, 0);
+        if (totalAlloc < item.quantity) {
+          count += 1;
+        }
+      } else {
+        count += 1;
+      }
+    });
+    return count;
+  })();
+
+  const checkedUnits = (() => {
+    let count = 0;
+    plan.gearList.forEach(item => {
+      if (item.isShared) {
+        if (plan.checkProgress[item.id]) count += 1;
+        return;
+      }
+      const allocs = item.allocations || [];
+      if (allocs.length > 0) {
+        allocs.forEach(alloc => {
+          const key = `${item.id}:${alloc.backpackId}`;
+          if (plan.checkProgress[key]) count += 1;
+        });
+        const totalAlloc = allocs.reduce((s, a) => s + a.quantity, 0);
+        if (totalAlloc < item.quantity) {
+          const key = `${item.id}:unassigned`;
+          if (plan.checkProgress[key]) count += 1;
+        }
+      } else {
+        if (plan.checkProgress[item.id]) count += 1;
+      }
+    });
+    return count;
+  })();
+
+  const uncheckedCount = totalCheckUnits - checkedUnits;
+
+  const sharedItems = plan.gearList.filter(item => item.isShared);
 
   const handleJump = (sectionId: string) => {
     const element = document.getElementById(sectionId);
@@ -298,9 +344,154 @@ const DepartureChecklist = ({ onClose }: DepartureChecklistProps) => {
 
                         {cat.id === 'unchecked' && (
                           <div className="pt-3">
-                            <p className="text-sm text-earth-600 mb-3">
-                              还有 {uncheckedCount} 项装备需要出发前确认
-                            </p>
+                            <div className="flex items-center justify-between mb-3 px-1">
+                              <p className="text-sm text-earth-600">
+                                已确认 {checkedUnits}/{totalCheckUnits} 项
+                              </p>
+                              <div className="flex-1 mx-3 h-2 bg-earth-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-purple-500 rounded-full transition-all duration-500"
+                                  style={{ width: `${totalCheckUnits > 0 ? (checkedUnits / totalCheckUnits) * 100 : 0}%` }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-2 max-h-60 overflow-y-auto mb-3">
+                              {plan.crew.map(member => {
+                                const memberBackpacks = plan.backpacks.filter(b => b.ownerId === member.id);
+                                let memberTotal = 0;
+                                let memberChecked = 0;
+
+                                const backpackStats = memberBackpacks.map(bp => {
+                                  const bpItems = getBackpackItems(bp.id, plan.gearList);
+                                  const bpTotal = bpItems.length;
+                                  const bpChecked = bpItems.filter(
+                                    ({ item }) => plan.checkProgress[`${item.id}:${bp.id}`]
+                                  ).length;
+                                  memberTotal += bpTotal;
+                                  memberChecked += bpChecked;
+                                  return { bp, bpTotal, bpChecked };
+                                });
+
+                                const memberUnassignedItems = getUnassignedItems(plan.gearList).filter(
+                                  ({ item }) => !item.isShared && item.carrierId === member.id
+                                );
+                                const unassignedTotal = memberUnassignedItems.length;
+                                const unassignedChecked = memberUnassignedItems.filter(
+                                  ({ item }) => plan.checkProgress[`${item.id}:unassigned`]
+                                ).length;
+                                memberTotal += unassignedTotal;
+                                memberChecked += unassignedChecked;
+
+                                if (memberTotal === 0) return null;
+
+                                return (
+                                  <div key={member.id} className="space-y-1.5">
+                                    <div className="flex items-center gap-2 px-2 py-1">
+                                      <div
+                                        className="w-2.5 h-2.5 rounded-full"
+                                        style={{ backgroundColor: member.avatarColor }}
+                                      />
+                                      <span className="text-sm font-medium text-forest-800">
+                                        {member.name}
+                                      </span>
+                                      <span className={`text-xs ml-auto ${
+                                        memberChecked === memberTotal
+                                          ? 'text-green-600'
+                                          : 'text-earth-500'
+                                      }`}>
+                                        {memberChecked}/{memberTotal}
+                                        {memberChecked === memberTotal && memberTotal > 0 && ' ✓'}
+                                      </span>
+                                    </div>
+                                    
+                                    {backpackStats.map(({ bp, bpTotal, bpChecked }) => (
+                                      <div
+                                        key={bp.id}
+                                        className={`flex items-center gap-2 px-3 py-1.5 ml-4 rounded text-sm ${
+                                          bpChecked === bpTotal && bpTotal > 0
+                                            ? 'bg-green-50'
+                                            : 'bg-white/60'
+                                        }`}
+                                      >
+                                        <BackpackIcon className={`w-3.5 h-3.5 ${
+                                          bpChecked === bpTotal && bpTotal > 0
+                                            ? 'text-green-500'
+                                            : 'text-earth-400'
+                                        }`} />
+                                        <span className="text-forest-700 flex-1">
+                                          {bp.name}
+                                        </span>
+                                        <span className={`text-xs ${
+                                          bpChecked === bpTotal
+                                            ? 'text-green-600'
+                                            : 'text-earth-500'
+                                        }`}>
+                                          {bpChecked}/{bpTotal}
+                                        </span>
+                                      </div>
+                                    ))}
+
+                                    {unassignedTotal > 0 && (
+                                      <div
+                                        className={`flex items-center gap-2 px-3 py-1.5 ml-4 rounded text-sm ${
+                                          unassignedChecked === unassignedTotal
+                                            ? 'bg-green-50'
+                                            : 'bg-white/60'
+                                        }`}
+                                      >
+                                        <Package className={`w-3.5 h-3.5 ${
+                                          unassignedChecked === unassignedTotal
+                                            ? 'text-green-500'
+                                            : 'text-earth-400'
+                                        }`} />
+                                        <span className="text-earth-700 flex-1">
+                                          未分配背包
+                                        </span>
+                                        <span className={`text-xs ${
+                                          unassignedChecked === unassignedTotal
+                                            ? 'text-green-600'
+                                            : 'text-earth-500'
+                                        }`}>
+                                          {unassignedChecked}/{unassignedTotal}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {sharedItems.length > 0 && (() => {
+                                const sharedTotal = sharedItems.length;
+                                const sharedChecked = sharedItems.filter(
+                                  item => plan.checkProgress[item.id]
+                                ).length;
+                                return (
+                                  <div className="space-y-1.5 pt-1">
+                                    <div
+                                      className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
+                                        sharedChecked === sharedTotal
+                                          ? 'bg-green-50'
+                                          : 'bg-white/60'
+                                      }`}
+                                    >
+                                      <span>👥</span>
+                                      <span className="text-forest-700 flex-1">
+                                        共享装备
+                                      </span>
+                                      <span className={`text-xs ${
+                                        sharedChecked === sharedTotal
+                                          ? 'text-green-600'
+                                          : 'text-earth-500'
+                                      }`}>
+                                        {sharedChecked}/{sharedTotal}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
                             <button
                               onClick={() => {
                                 const startCheckBtn = document.querySelector('[data-check-mode]') as HTMLButtonElement;
